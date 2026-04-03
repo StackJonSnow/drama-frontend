@@ -31,14 +31,39 @@ const loadingServices = ref(true);
 
 // Log panel
 const logPanelRef = ref<HTMLElement | null>(null);
-const logs = ref<{ time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string }[]>([]);
+const logs = ref<{ id: number; time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string }[]>([]);
+const expandedLogIds = ref<number[]>([]);
+let logIdSeed = 1;
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  logs.value.push({ time, type, message, detail });
+  logs.value.push({ id: logIdSeed++, time, type, message, detail });
   nextTick(() => {
     if (logPanelRef.value) logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight;
   });
+}
+
+function shouldCollapseDetail(detail?: string) {
+  return Boolean(detail && detail.length > 700);
+}
+
+function isLogExpanded(id: number) {
+  return expandedLogIds.value.includes(id);
+}
+
+function toggleLogExpanded(id: number) {
+  if (isLogExpanded(id)) {
+    expandedLogIds.value = expandedLogIds.value.filter((item) => item !== id);
+    return;
+  }
+
+  expandedLogIds.value = [...expandedLogIds.value, id];
+}
+
+function getVisibleDetail(log: { id: number; detail?: string }) {
+  if (!log.detail) return '';
+  if (isLogExpanded(log.id) || !shouldCollapseDetail(log.detail)) return log.detail;
+  return `${log.detail.slice(0, 700)}\n\n...（已折叠 ${log.detail.length - 700} 个字符）`;
 }
 
 // Step preview
@@ -193,6 +218,7 @@ function startNew() {
   pipelineStore.clearCurrentTask();
   hasExistingTask.value = false;
   logs.value = [];
+  expandedLogIds.value = [];
   previewStep.value = null;
   formData.value = {
     title: '', genre: '', script_type: 'tv', style: '', target_platform: '',
@@ -213,8 +239,6 @@ watch(() => pipelineStore.realtimeLogs, (entries) => {
   const detail = latest.detail ? `\n${latest.detail}` : undefined;
   addLog(latest.level, latest.message, detail);
 }, { deep: true });
-
-watch(() => pipelineStore.latestLog, (val) => { if (val) addLog('info', val); });
 watch(() => pipelineStore.errorLogs, (logs) => {
   const latest = logs[logs.length - 1];
   if (latest) addLog('error', `[Step ${latest.step}] ${latest.message}`);
@@ -479,7 +503,7 @@ watch(() => pipelineStore.errorLogs, (logs) => {
               <span class="text-[10px] text-[#525252]">{{ logs.length }}条</span>
             </div>
             <div ref="logPanelRef" class="flex-1 overflow-auto px-4 py-2 font-mono text-xs space-y-0.5">
-              <div v-for="(log, i) in logs" :key="i" class="flex gap-2">
+              <div v-for="log in logs" :key="log.id" class="flex gap-2">
                 <span class="text-[#525252] flex-shrink-0">{{ log.time }}</span>
                 <span :class="[
                   'flex-shrink-0',
@@ -487,7 +511,15 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                 ]">[{{ log.type === 'error' ? 'ERR' : log.type === 'success' ? 'OK' : log.type === 'warning' ? 'WRN' : 'INF' }}]</span>
                 <div class="min-w-0">
                   <div :class="log.type === 'error' ? 'text-red-300' : log.type === 'warning' ? 'text-yellow-200' : 'text-[#D4D4D4]'">{{ log.message }}</div>
-                  <div v-if="log.detail" class="text-[#6E6E6E] whitespace-pre-wrap leading-5 mt-0.5">{{ log.detail }}</div>
+                  <div v-if="log.detail" class="text-[#6E6E6E] whitespace-pre-wrap leading-5 mt-0.5 break-words">{{ getVisibleDetail(log) }}</div>
+                  <button
+                    v-if="shouldCollapseDetail(log.detail)"
+                    type="button"
+                    @click="toggleLogExpanded(log.id)"
+                    class="mt-1 text-[10px] text-[#60A5FA] hover:text-[#93C5FD] transition-colors"
+                  >
+                    {{ isLogExpanded(log.id) ? '收起详情' : '展开详情' }}
+                  </button>
                 </div>
               </div>
               <div v-if="!logs.length" class="text-[#525252]">等待日志...</div>
