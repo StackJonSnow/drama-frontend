@@ -203,9 +203,10 @@ class ApiService {
     });
   }
 
-  async resumePipeline(taskId: string): Promise<ApiResponse> {
+  async resumePipeline(taskId: string, payload?: { ai_service?: string; ai_model?: string }): Promise<ApiResponse<{ ai_service?: string; ai_model?: string }>> {
     return this.request(`/api/pipeline/${taskId}/resume`, {
       method: 'POST',
+      body: JSON.stringify(payload || {}),
     });
   }
 

@@ -9,10 +9,13 @@ export interface PipelineTask {
   title: string;
   genre: string;
   script_type: string;
+  ai_service: string;
+  ai_model?: string | null;
   total_episodes: number;
   completed_episodes: number;
   current_step: number;
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed';
+  error_message?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -85,7 +88,7 @@ const STEP_LABELS: Record<string, string> = {
 export const usePipelineStore = defineStore('pipeline', () => {
   // State
   const tasks = ref<PipelineTask[]>([]);
-  const currentTask = ref<any>(null);
+  const currentTask = ref<PipelineTask | null>(null);
   const steps = ref<PipelineStep[]>([]);
   const episodes = ref<PipelineEpisode[]>([]);
   const score = ref<PipelineScore | null>(null);
@@ -108,8 +111,9 @@ export const usePipelineStore = defineStore('pipeline', () => {
   // Computed
   const currentStepLabel = computed(() => {
     if (!currentTask.value) return '';
+    const currentStep = currentTask.value.current_step;
     const stepName = steps.value.find(
-      s => s.step_number === currentTask.value.current_step
+      s => s.step_number === currentStep
     )?.step_name;
     return STEP_LABELS[stepName || ''] || stepName || '';
   });
@@ -134,6 +138,14 @@ export const usePipelineStore = defineStore('pipeline', () => {
   const isCompleted = computed(() =>
     currentTask.value?.status === 'completed'
   );
+
+  function patchCurrentTask(patch: Partial<PipelineTask>) {
+    if (!currentTask.value) return;
+    currentTask.value = {
+      ...currentTask.value,
+      ...patch,
+    };
+  }
 
   // Actions
   async function startPipeline(params: {
@@ -211,7 +223,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
     try {
       const response = await apiService.pausePipeline(taskId);
       if (response.success) {
-        currentTask.value = { ...currentTask.value, status: 'paused' };
+        patchCurrentTask({ status: 'paused' });
       }
       return response;
     } catch (err: any) {
@@ -220,11 +232,15 @@ export const usePipelineStore = defineStore('pipeline', () => {
     }
   }
 
-  async function resumePipeline(taskId: string) {
+  async function resumePipeline(taskId: string, payload?: { ai_service?: string; ai_model?: string }) {
     try {
-      const response = await apiService.resumePipeline(taskId);
+      const response = await apiService.resumePipeline(taskId, payload);
       if (response.success) {
-        currentTask.value = { ...currentTask.value, status: 'running' };
+        patchCurrentTask({
+          status: 'running',
+          ai_service: response.data?.ai_service || payload?.ai_service || currentTask.value?.ai_service || 'cloudflare-ai',
+          ai_model: response.data?.ai_model || payload?.ai_model || currentTask.value?.ai_model || null,
+        });
         connectToStream(taskId);
       }
       return response;
@@ -239,7 +255,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
       const response = await apiService.cancelPipeline(taskId);
       if (response.success) {
         closeStream();
-        currentTask.value = { ...currentTask.value, status: 'failed' };
+        patchCurrentTask({ status: 'failed' });
         generating.value = false;
       }
       return response;
@@ -290,16 +306,15 @@ export const usePipelineStore = defineStore('pipeline', () => {
 
     eventSource.value = connectSSE(taskId, {
       onStatus: (data) => {
-        currentTask.value = { ...currentTask.value, ...data };
+        patchCurrentTask(data);
         streamConnected.value = true;
       },
       onProgress: (data: SSEProgressEvent) => {
-        currentTask.value = {
-          ...currentTask.value,
+        patchCurrentTask({
           status: data.status,
           current_step: data.currentStep,
           completed_episodes: data.completedEpisodes,
-        };
+        });
         latestLog.value = `${data.stepName} - 第${data.completedEpisodes}/${data.totalEpisodes}集`;
       },
       onLog: (data: SSELogEvent) => {
@@ -326,10 +341,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
         }
       },
       onDone: (data: SSEDoneEvent) => {
-        currentTask.value = {
-          ...currentTask.value,
-          status: data.status,
-        };
+        patchCurrentTask({ status: data.status });
         generating.value = false;
         streamConnected.value = false;
         fetchStatus(taskId);
