@@ -28,6 +28,8 @@ const resumeService = ref('cloudflare-ai');
 const resumeModel = ref('');
 const nowTick = ref(Date.now());
 let nowTimer: ReturnType<typeof setInterval> | null = null;
+const expandedRealtimeLogIds = ref<number[]>([]);
+const realtimeLogFilter = ref<'all' | 'summary'>('all');
 
 // 步骤内容预览
 const expandedStep = ref<number | null>(null);
@@ -104,9 +106,14 @@ onMounted(async () => {
     pipelineStore.fetchSteps(taskId),
     pipelineStore.fetchVersions(taskId),
   ]);
+
+  if (pipelineStore.currentTask?.status === 'running') {
+    pipelineStore.connectToStream(taskId);
+  }
 });
 
 onUnmounted(() => {
+  pipelineStore.closeStream();
   if (nowTimer) {
     clearInterval(nowTimer);
     nowTimer = null;
@@ -136,7 +143,10 @@ async function toggleStepPreview(stepNumber: number) {
   if (!stepContent.value[stepNumber]) {
     try {
       const data = await pipelineStore.fetchStepContent(taskId, stepNumber);
-      stepContent.value[stepNumber] = data.content;
+      stepContent.value[stepNumber] = {
+        content: data.content,
+        current_task_summary: data.current_task_summary,
+      };
     } catch {
       toast.error('获取步骤内容失败');
     }
@@ -687,6 +697,83 @@ function getStepLatestAIMetricsLabel(stepNumber: number) {
   return parts.join(' · ');
 }
 
+function getStepSummaryPreview(step: { current_task_summary?: string | null }) {
+  const summary = step.current_task_summary?.trim();
+  if (!summary) return '';
+  return summary.length > 120 ? `${summary.slice(0, 120)}…` : summary;
+}
+
+const mergedRealtimeLogs = computed(() => {
+  const merged: Array<{
+    id: number;
+    time: string;
+    type: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+    detail?: string;
+  }> = [];
+
+  for (const entry of pipelineStore.realtimeLogs) {
+    const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
+    if (entry.message.startsWith('[AI Output Stream]')) {
+      const last = merged[merged.length - 1];
+      if (last && last.message === entry.message && last.type === entry.level) {
+        last.detail = `${last.detail || ''}${entry.detail || ''}`;
+        last.time = time;
+        continue;
+      }
+    }
+
+    merged.push({
+      id: entry.id,
+      time,
+      type: entry.level,
+      message: entry.message,
+      detail: entry.detail,
+    });
+  }
+
+  return merged;
+});
+
+function shouldCollapseRealtimeDetail(detail?: string) {
+  return Boolean(detail && detail.length > 700);
+}
+
+function isRealtimeLogExpanded(id: number) {
+  return expandedRealtimeLogIds.value.includes(id);
+}
+
+function toggleRealtimeLogExpanded(id: number) {
+  if (isRealtimeLogExpanded(id)) {
+    expandedRealtimeLogIds.value = expandedRealtimeLogIds.value.filter((item) => item !== id);
+    return;
+  }
+
+  expandedRealtimeLogIds.value = [...expandedRealtimeLogIds.value, id];
+}
+
+function getVisibleRealtimeDetail(log: { id: number; detail?: string }) {
+  if (!log.detail) return '';
+  if (isRealtimeLogExpanded(log.id) || !shouldCollapseRealtimeDetail(log.detail)) return log.detail;
+  return `${log.detail.slice(0, 700)}\n\n...（已折叠 ${log.detail.length - 700} 个字符）`;
+}
+
+function isSummaryRealtimeLog(log: { message: string }) {
+  return log.message === '[Current Task Summary]';
+}
+
+const visibleRealtimeLogs = computed(() => {
+  if (realtimeLogFilter.value === 'summary') {
+    return mergedRealtimeLogs.value.filter((log) => isSummaryRealtimeLog(log));
+  }
+  return mergedRealtimeLogs.value;
+});
+
 // 解析故事大纲
 const storyOutline = computed(() => {
   const step = pipelineStore.steps.find(s => s.step_number === 1);
@@ -936,14 +1023,14 @@ function formatActLabel(act: string) {
           <div class="space-y-2">
             <div
               v-for="step in (pipelineStore.steps.length ? pipelineStore.steps : [
-                { step_number: 1, step_name: 'story_outline', status: 'pending', error_message: '' },
-                { step_number: 2, step_name: 'characters', status: 'pending', error_message: '' },
-                { step_number: 3, step_name: 'plot_structure', status: 'pending', error_message: '' },
-                { step_number: 4, step_name: 'episode_plan', status: 'pending', error_message: '' },
-                { step_number: 5, step_name: 'scenes', status: 'pending', error_message: '' },
-                { step_number: 6, step_name: 'dialogue', status: 'pending', error_message: '' },
-                { step_number: 7, step_name: 'compose', status: 'pending', error_message: '' },
-                { step_number: 8, step_name: 'evaluate', status: 'pending', error_message: '' },
+                { step_number: 1, step_name: 'story_outline', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 2, step_name: 'characters', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 3, step_name: 'plot_structure', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 4, step_name: 'episode_plan', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 5, step_name: 'scenes', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 6, step_name: 'dialogue', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 7, step_name: 'compose', status: 'pending', error_message: '', current_task_summary: null },
+                { step_number: 8, step_name: 'evaluate', status: 'pending', error_message: '', current_task_summary: null },
               ])"
               :key="step.step_number"
               class="rounded-lg border overflow-hidden"
@@ -983,6 +1070,9 @@ function formatActLabel(act: string) {
                     <div v-if="getStepLatestAIMetrics(step.step_number)" class="text-[10px] text-sky-300 mt-0.5">
                       最近AI：{{ getStepLatestAIMetricsLabel(step.step_number) }}
                     </div>
+                    <div v-if="step.current_task_summary" class="text-[10px] text-violet-300 mt-0.5 truncate">
+                      摘要：{{ getStepSummaryPreview(step) }}
+                    </div>
                     <div v-if="isTaskStepPaused(step)" class="text-yellow-300 text-xs mt-0.5">当前节点已暂停</div>
                     <div v-if="step.error_message" class="text-red-400 text-xs mt-0.5">{{ step.error_message }}</div>
                   </div>
@@ -993,8 +1083,12 @@ function formatActLabel(act: string) {
                 </div>
               </div>
               <!-- 展开的内容预览 -->
-              <div v-if="expandedStep === step.step_number && stepContent[step.step_number]" class="border-t border-gray-700 p-4 bg-gray-900/50 max-h-96 overflow-y-auto">
-                <pre class="text-gray-300 text-sm whitespace-pre-wrap font-sans">{{ JSON.stringify(stepContent[step.step_number], null, 2) }}</pre>
+              <div v-if="expandedStep === step.step_number && stepContent[step.step_number]" class="border-t border-gray-700 p-4 bg-gray-900/50 max-h-96 overflow-y-auto space-y-4">
+                <div v-if="stepContent[step.step_number].current_task_summary" class="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+                  <div class="text-xs text-violet-300 mb-2 font-medium">当前任务摘要</div>
+                  <div class="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">{{ stepContent[step.step_number].current_task_summary }}</div>
+                </div>
+                <pre class="text-gray-300 text-sm whitespace-pre-wrap font-sans">{{ JSON.stringify(stepContent[step.step_number].content, null, 2) }}</pre>
               </div>
             </div>
           </div>
@@ -1004,6 +1098,43 @@ function formatActLabel(act: string) {
         <div v-if="pipelineStore.currentTask.error_message" class="card border-red-500/30 bg-red-500/5">
           <h2 class="text-xl font-semibold text-red-400 mb-4">⚠ 异常日志</h2>
           <pre class="text-red-300 text-sm whitespace-pre-wrap font-mono">{{ pipelineStore.currentTask.error_message }}</pre>
+        </div>
+
+        <div class="card">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <h2 class="text-xl font-semibold text-white">实时日志</h2>
+              <div class="flex items-center rounded-md border border-gray-700 bg-gray-900 p-0.5 text-[10px]">
+                <button type="button" @click="realtimeLogFilter = 'all'" :class="realtimeLogFilter === 'all' ? 'px-2 py-1 rounded bg-gray-800 text-white' : 'px-2 py-1 text-gray-400 hover:text-white transition-colors'">全部</button>
+                <button type="button" @click="realtimeLogFilter = 'summary'" :class="realtimeLogFilter === 'summary' ? 'px-2 py-1 rounded bg-violet-500/30 text-violet-100' : 'px-2 py-1 text-violet-300 hover:text-violet-200 transition-colors'">摘要</button>
+              </div>
+            </div>
+            <span class="text-xs text-gray-500">{{ visibleRealtimeLogs.length }} 条</span>
+          </div>
+
+          <div class="max-h-[420px] overflow-y-auto rounded-lg border border-gray-700 bg-gray-950/70 p-4 font-mono text-xs space-y-3">
+            <div v-if="!visibleRealtimeLogs.length" class="text-gray-500">暂无实时日志</div>
+
+            <div v-for="log in visibleRealtimeLogs" :key="log.id" :class="isSummaryRealtimeLog(log) ? 'rounded-md border border-violet-500/20 bg-violet-500/8 px-2 py-2 flex gap-2' : 'flex gap-2'">
+              <span class="text-gray-500 flex-shrink-0">{{ log.time }}</span>
+              <span :class="[
+                'flex-shrink-0',
+                isSummaryRealtimeLog(log) ? 'text-violet-300' : (log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : log.type === 'warning' ? 'text-yellow-400' : 'text-gray-400')
+              ]">[{{ isSummaryRealtimeLog(log) ? 'SUM' : (log.type === 'error' ? 'ERR' : log.type === 'success' ? 'OK' : log.type === 'warning' ? 'WRN' : 'INF') }}]</span>
+              <div class="min-w-0">
+                <div :class="isSummaryRealtimeLog(log) ? 'text-violet-200 font-medium' : (log.type === 'error' ? 'text-red-300' : log.type === 'warning' ? 'text-yellow-200' : 'text-gray-200')">{{ isSummaryRealtimeLog(log) ? '当前任务摘要' : log.message }}</div>
+                <div v-if="log.detail" :class="isSummaryRealtimeLog(log) ? 'mt-1 whitespace-pre-wrap break-words leading-5 text-violet-200/90' : 'mt-0.5 whitespace-pre-wrap break-words leading-5 text-gray-500'">{{ getVisibleRealtimeDetail(log) }}</div>
+                <button
+                  v-if="shouldCollapseRealtimeDetail(log.detail)"
+                  type="button"
+                  @click="toggleRealtimeLogExpanded(log.id)"
+                  :class="isSummaryRealtimeLog(log) ? 'mt-1 text-[10px] text-violet-300 hover:text-violet-200 transition-colors' : 'mt-1 text-[10px] text-sky-400 hover:text-sky-300 transition-colors'"
+                >
+                  {{ isRealtimeLogExpanded(log.id) ? '收起详情' : '展开详情' }}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="card">

@@ -33,16 +33,33 @@ const resumeModel = ref('');
 
 // Log panel
 const logPanelRef = ref<HTMLElement | null>(null);
-const logs = ref<{ id: number; time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string }[]>([]);
+const logs = ref<{ id: number; time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string; isStream?: boolean }[]>([]);
 const expandedLogIds = ref<number[]>([]);
 const nowTick = ref(Date.now());
 let logIdSeed = 1;
 let nowTimer: ReturnType<typeof setInterval> | null = null;
 const syncedRealtimeLogIds = ref<number[]>([]);
+const logFilter = ref<'all' | 'summary'>('all');
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   logs.value.push({ id: logIdSeed++, time, type, message, detail });
+  nextTick(() => {
+    if (logPanelRef.value) logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight;
+  });
+}
+
+function addOrMergeStreamLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
+  const existing = [...logs.value].reverse().find((log) => log.isStream && log.type === type && log.message === message);
+
+  if (!existing) {
+    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    logs.value.push({ id: logIdSeed++, time, type, message, detail, isStream: true });
+  } else {
+    existing.detail = `${existing.detail || ''}${detail || ''}`;
+    existing.time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
   nextTick(() => {
     if (logPanelRef.value) logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight;
   });
@@ -71,9 +88,21 @@ function getVisibleDetail(log: { id: number; detail?: string }) {
   return `${log.detail.slice(0, 700)}\n\n...（已折叠 ${log.detail.length - 700} 个字符）`;
 }
 
+function isSummaryLog(log: { message: string }) {
+  return log.message === '[Current Task Summary]';
+}
+
+const visibleLogs = computed(() => {
+  if (logFilter.value === 'summary') {
+    return logs.value.filter((log) => isSummaryLog(log));
+  }
+  return logs.value;
+});
+
 // Step preview
 const previewStep = ref<number | null>(null);
 const stepPreviewContent = ref<any>(null);
+const stepPreviewSummary = ref('');
 
 const STEP_LABELS: Record<string, string> = {
   story_outline: '故事大纲', characters: '角色设定', plot_structure: '剧情结构',
@@ -201,6 +230,12 @@ function getStepLatestAIMetricsLabel(stepNumber: number) {
   }
 
   return parts.join(' · ');
+}
+
+function getStepSummaryPreview(step: { current_task_summary?: string | null }) {
+  const summary = step.current_task_summary?.trim();
+  if (!summary) return '';
+  return summary.length > 84 ? `${summary.slice(0, 84)}…` : summary;
 }
 
 async function loadServices() {
@@ -357,6 +392,7 @@ async function viewStepPreview(stepNumber: number) {
   try {
     const data = await pipelineStore.fetchStepContent(pipelineStore.currentTask.id, stepNumber);
     stepPreviewContent.value = data.content;
+    stepPreviewSummary.value = data.current_task_summary || '';
   } catch { toast.error('加载步骤内容失败'); }
 }
 
@@ -367,6 +403,7 @@ function startNew() {
   syncedRealtimeLogIds.value = [];
   expandedLogIds.value = [];
   previewStep.value = null;
+  stepPreviewSummary.value = '';
   formData.value = {
     title: '', genre: '', script_type: 'tv', style: '', target_platform: '',
     target_duration: 60, character_count: 5, key_points: [], characters_input: [],
@@ -385,7 +422,11 @@ watch(() => pipelineStore.realtimeLogs, (entries) => {
 
   unseenEntries.forEach((entry) => {
     const detail = entry.detail ? `\n${entry.detail}` : undefined;
-    addLog(entry.level, entry.message, detail);
+    if (entry.message.startsWith('[AI Output Stream]')) {
+      addOrMergeStreamLog(entry.level, entry.message, detail);
+    } else {
+      addLog(entry.level, entry.message, detail);
+    }
     syncedRealtimeLogIds.value.push(entry.id);
   });
 }, { deep: true });
@@ -562,7 +603,7 @@ watch(() => pipelineStore.errorLogs, (logs) => {
 
           <!-- Steps list -->
           <div class="flex-1 overflow-auto py-1">
-            <div v-for="step in (pipelineStore.steps.length ? pipelineStore.steps : [1,2,3,4,5,6,7,8].map(n => ({step_number:n, step_name:['','story_outline','characters','plot_structure','episode_plan','scenes','dialogue','compose','evaluate'][n], status:'pending', error_message:''})))"
+            <div v-for="step in (pipelineStore.steps.length ? pipelineStore.steps : [1,2,3,4,5,6,7,8].map(n => ({step_number:n, step_name:['','story_outline','characters','plot_structure','episode_plan','scenes','dialogue','compose','evaluate'][n], status:'pending', error_message:'', current_task_summary: null})))"
               :key="step.step_number"
               @click="step.status === 'completed' ? viewStepPreview(step.step_number) : null"
               :class="[
@@ -601,6 +642,9 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                   </div>
                   <div v-if="getStepLatestAIMetrics(step.step_number)" class="text-[10px] text-[#7DD3FC] mt-0.5">
                     最近AI：{{ getStepLatestAIMetricsLabel(step.step_number) }}
+                  </div>
+                  <div v-if="step.current_task_summary" class="text-[10px] text-[#A78BFA] mt-0.5 truncate">
+                    摘要：{{ getStepSummaryPreview(step) }}
                   </div>
                   <div v-if="isTaskStepPaused(step)" class="text-[10px] text-yellow-300 mt-0.5">已暂停</div>
                   <div v-else-if="step.status === 'running'" class="text-[10px] text-[#60A5FA] mt-0.5">执行中...</div>
@@ -649,6 +693,10 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                   <span class="text-xs px-2 py-0.5 rounded bg-[#2563EB]/10 text-[#60A5FA]">Step {{ previewStep }}</span>
                   <h2 class="text-lg font-semibold text-white">{{ STEP_LABELS[pipelineStore.steps.find(s => s.step_number === previewStep)?.step_name || ''] }}</h2>
                 </div>
+                <div v-if="stepPreviewSummary" class="card mb-4 border border-[#8B5CF6]/20 bg-[#8B5CF6]/5">
+                  <div class="text-sm text-[#C4B5FD] mb-2">当前任务摘要</div>
+                  <div class="text-sm text-[#D4D4D4] whitespace-pre-wrap leading-relaxed">{{ stepPreviewSummary }}</div>
+                </div>
                 <div class="card">
                   <pre class="text-sm text-[#D4D4D4] whitespace-pre-wrap font-sans leading-relaxed">{{ JSON.stringify(stepPreviewContent, null, 2) }}</pre>
                 </div>
@@ -688,24 +736,31 @@ watch(() => pipelineStore.errorLogs, (logs) => {
           <!-- Log panel (bottom) -->
           <div class="h-[200px] flex-shrink-0 border-t border-[#2F2F2F] flex flex-col">
             <div class="px-4 py-2 flex items-center justify-between border-b border-[#2F2F2F]">
-              <span class="text-xs text-[#737373] font-medium">实时日志</span>
-              <span class="text-[10px] text-[#525252]">{{ logs.length }}条</span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-[#737373] font-medium">实时日志</span>
+                <div class="flex items-center rounded-md border border-[#2F2F2F] bg-[#191919] p-0.5 text-[10px]">
+                  <button type="button" @click="logFilter = 'all'" :class="logFilter === 'all' ? 'px-2 py-1 rounded bg-[#2F2F2F] text-white' : 'px-2 py-1 text-[#737373] hover:text-white transition-colors'">全部</button>
+                  <button type="button" @click="logFilter = 'summary'" :class="logFilter === 'summary' ? 'px-2 py-1 rounded bg-[#4C1D95]/40 text-[#DDD6FE]' : 'px-2 py-1 text-[#A78BFA] hover:text-[#DDD6FE] transition-colors'">摘要</button>
+                </div>
+              </div>
+              <span class="text-[10px] text-[#525252]">{{ visibleLogs.length }}条</span>
             </div>
             <div ref="logPanelRef" class="flex-1 overflow-auto px-4 py-2 font-mono text-xs space-y-0.5">
-              <div v-for="log in logs" :key="log.id" class="flex gap-2">
+              <div v-if="!visibleLogs.length" class="text-[#525252]">暂无日志</div>
+              <div v-for="log in visibleLogs" :key="log.id" :class="isSummaryLog(log) ? 'rounded-md border border-[#8B5CF6]/20 bg-[#8B5CF6]/8 px-2 py-2 flex gap-2' : 'flex gap-2'">
                 <span class="text-[#525252] flex-shrink-0">{{ log.time }}</span>
                 <span :class="[
                   'flex-shrink-0',
-                  log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : log.type === 'warning' ? 'text-yellow-400' : 'text-[#A3A3A3]'
-                ]">[{{ log.type === 'error' ? 'ERR' : log.type === 'success' ? 'OK' : log.type === 'warning' ? 'WRN' : 'INF' }}]</span>
+                  isSummaryLog(log) ? 'text-[#C4B5FD]' : (log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : log.type === 'warning' ? 'text-yellow-400' : 'text-[#A3A3A3]')
+                ]">[{{ isSummaryLog(log) ? 'SUM' : (log.type === 'error' ? 'ERR' : log.type === 'success' ? 'OK' : log.type === 'warning' ? 'WRN' : 'INF') }}]</span>
                 <div class="min-w-0">
-                  <div :class="log.type === 'error' ? 'text-red-300' : log.type === 'warning' ? 'text-yellow-200' : 'text-[#D4D4D4]'">{{ log.message }}</div>
-                  <div v-if="log.detail" class="text-[#6E6E6E] whitespace-pre-wrap leading-5 mt-0.5 break-words">{{ getVisibleDetail(log) }}</div>
+                  <div :class="isSummaryLog(log) ? 'text-[#E9D5FF] font-medium' : (log.type === 'error' ? 'text-red-300' : log.type === 'warning' ? 'text-yellow-200' : 'text-[#D4D4D4]')">{{ isSummaryLog(log) ? '当前任务摘要' : log.message }}</div>
+                  <div v-if="log.detail" :class="isSummaryLog(log) ? 'text-[#D8B4FE] whitespace-pre-wrap leading-5 mt-1 break-words' : 'text-[#6E6E6E] whitespace-pre-wrap leading-5 mt-0.5 break-words'">{{ getVisibleDetail(log) }}</div>
                   <button
                     v-if="shouldCollapseDetail(log.detail)"
                     type="button"
                     @click="toggleLogExpanded(log.id)"
-                    class="mt-1 text-[10px] text-[#60A5FA] hover:text-[#93C5FD] transition-colors"
+                    :class="isSummaryLog(log) ? 'mt-1 text-[10px] text-[#C4B5FD] hover:text-[#DDD6FE] transition-colors' : 'mt-1 text-[10px] text-[#60A5FA] hover:text-[#93C5FD] transition-colors'"
                   >
                     {{ isLogExpanded(log.id) ? '收起详情' : '展开详情' }}
                   </button>
