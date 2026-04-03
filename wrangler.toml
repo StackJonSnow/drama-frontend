@@ -4,11 +4,11 @@ pages_build_output_dir = "./dist"
 
 # 环境变量
 [vars]
-VITE_API_BASE = "https://drama-generator-backend.your-subdomain.workers.dev"
+VITE_API_BASE = "https://drama-backend.catxue96.workers.dev"
 
 [env.preview]
-vars = { VITE_API_BASE = "http://localhost:8787" }
+vars = { VITE_API_BASE = "http://drama-backend.catxue96.workers.dev" }
 
 # 生产环境配置
 [env.production]
-vars = { VITE_API_BASE = "https://drama-generator-backend.your-subdomain.workers.dev" }
+vars = { VITE_API_BASE = "https://drama-backend.catxue96.workers.dev" }
