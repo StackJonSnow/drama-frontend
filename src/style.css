@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #191919;
+    color: #EBEBEB;
+    margin: 0;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #404040; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 rounded-md font-medium text-sm transition-colors duration-150;
+    background-color: #2563EB;
+    color: #fff;
+  }
+  .btn-primary:hover { background-color: #1D4ED8; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-secondary {
+    @apply px-4 py-2 rounded-md font-medium text-sm transition-colors duration-150;
+    background-color: #2F2F2F;
+    color: #D4D4D4;
+    border: 1px solid #404040;
+  }
+  .btn-secondary:hover { background-color: #3a3a3a; border-color: #555; }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 rounded-md font-medium text-sm transition-colors duration-150;
+    color: #A3A3A3;
+    background: transparent;
+  }
+  .btn-ghost:hover { background-color: #2F2F2F; color: #EBEBEB; }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-md text-sm transition-colors duration-150;
+    background-color: #2F2F2F;
+    border: 1px solid #404040;
+    color: #EBEBEB;
+  }
+  .input-field::placeholder { color: #737373; }
+  .input-field:focus {
+    @apply outline-none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+  }
+
+  .card {
+    @apply rounded-lg p-5;
+    background-color: #202020;
+    border: 1px solid #2F2F2F;
+  }
+  .card:hover { border-color: #404040; }
+
+  .surface {
+    background-color: #202020;
+  }
+
+  .sidebar {
+    background-color: #202020;
+    border-right: 1px solid #2F2F2F;
+  }
+}

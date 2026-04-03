@@ -1,0 +1,15 @@
+name = "drama-generator-frontend"
+compatibility_date = "2025-04-01"
+pages_build_output_dir = "./dist"
+
+# 环境变量
+[vars]
+VITE_API_BASE = "https://drama-generator-backend.your-subdomain.workers.dev"
+
+# 开发环境配置
+[env.dev]
+vars = { VITE_API_BASE = "http://localhost:8787" }
+
+# 生产环境配置
+[env.production]
+vars = { VITE_API_BASE = "https://drama-generator-backend.your-subdomain.workers.dev" }
