@@ -6,8 +6,7 @@ pages_build_output_dir = "./dist"
 [vars]
 VITE_API_BASE = "https://drama-generator-backend.your-subdomain.workers.dev"
 
-# 开发环境配置
-[env.dev]
+[env.preview]
 vars = { VITE_API_BASE = "http://localhost:8787" }
 
 # 生产环境配置
