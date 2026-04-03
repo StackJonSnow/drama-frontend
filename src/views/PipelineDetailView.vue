@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { usePipelineStore } from '@/stores/pipeline';
 import { useToast } from '@/composables/useToast';
+import apiService from '@/services/api';
+import type { AIConfig, AIService } from '@/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -19,13 +21,81 @@ const compareTargetId = ref('');
 const branchSourceVersionId = ref('');
 const branchLabel = ref('');
 const branchChangeNotes = ref('');
+const availableServices = ref<AIService[]>([]);
+const configuredServices = ref<AIConfig[]>([]);
+const loadingServices = ref(true);
+const resumeService = ref('cloudflare-ai');
+const resumeModel = ref('');
+const nowTick = ref(Date.now());
+let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 // 步骤内容预览
 const expandedStep = ref<number | null>(null);
 const stepContent = ref<Record<number, any>>({});
 
+const resumeUsableServices = computed(() => {
+  return availableServices.value.filter((service) => {
+    if (service.id === 'cloudflare-ai') return true;
+    const config = configuredServices.value.find((item) => item.service_name === service.id);
+    return config?.validation_status === 'passed';
+  });
+});
+
+const currentTaskServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === pipelineStore.currentTask?.ai_service),
+);
+
+const currentTaskServiceConfig = computed(() =>
+  configuredServices.value.find((item) => item.service_name === pipelineStore.currentTask?.ai_service),
+);
+
+const resumeServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === resumeService.value),
+);
+
+const resumeModelSuggestions = computed(() => {
+  const suggestions = [
+    pipelineStore.currentTask?.ai_model,
+    configuredServices.value.find((item) => item.service_name === resumeService.value)?.model,
+    availableServices.value.find((item) => item.id === resumeService.value)?.defaultModel,
+  ].filter((item): item is string => Boolean(item && item.trim()));
+
+  return Array.from(new Set(suggestions));
+});
+
+function syncResumeSelectionFromTask() {
+  const task = pipelineStore.currentTask;
+  if (!task) return;
+  resumeService.value = task.ai_service || 'cloudflare-ai';
+  resumeModel.value = task.ai_model || currentTaskServiceConfig.value?.model || currentTaskServiceMeta.value?.defaultModel || '';
+}
+
+async function loadServices() {
+  loadingServices.value = true;
+  try {
+    const [servicesResponse, configResponse] = await Promise.all([
+      apiService.getAIServices(),
+      apiService.getAIConfig(),
+    ]);
+    availableServices.value = servicesResponse.data?.services || [];
+    configuredServices.value = configResponse.data?.configs || [];
+    syncResumeSelectionFromTask();
+  } catch (error: any) {
+    toast.error(error.message || '加载模型渠道失败');
+  } finally {
+    loadingServices.value = false;
+  }
+}
+
 onMounted(async () => {
-  await pipelineStore.fetchStatus(taskId);
+  nowTimer = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 1000);
+
+  await Promise.all([
+    pipelineStore.fetchStatus(taskId),
+    loadServices(),
+  ]);
   if (!pipelineStore.currentTask) {
     toast.error('任务不存在');
     router.push('/generate');
@@ -34,6 +104,27 @@ onMounted(async () => {
     pipelineStore.fetchSteps(taskId),
     pipelineStore.fetchVersions(taskId),
   ]);
+});
+
+onUnmounted(() => {
+  if (nowTimer) {
+    clearInterval(nowTimer);
+    nowTimer = null;
+  }
+});
+
+watch(() => pipelineStore.currentTask?.id, () => {
+  syncResumeSelectionFromTask();
+}, { immediate: true });
+
+watch(() => resumeService.value, (serviceId) => {
+  const config = configuredServices.value.find((item) => item.service_name === serviceId);
+  const service = availableServices.value.find((item) => item.id === serviceId);
+  if (serviceId === pipelineStore.currentTask?.ai_service) {
+    resumeModel.value = pipelineStore.currentTask?.ai_model || config?.model || service?.defaultModel || '';
+    return;
+  }
+  resumeModel.value = config?.model || service?.defaultModel || '';
 });
 
 async function toggleStepPreview(stepNumber: number) {
@@ -58,6 +149,34 @@ async function handleExport() {
     toast.success(`已导出: ${filename}`);
   } catch (error: any) {
     toast.error(error.message || '导出失败');
+  }
+}
+
+async function handlePause() {
+  if (!pipelineStore.currentTask) return;
+  try {
+    await pipelineStore.pausePipeline(taskId);
+    toast.success('任务已暂停');
+  } catch (error: any) {
+    toast.error(error.message || '暂停失败');
+  }
+}
+
+async function handleResume() {
+  if (!pipelineStore.currentTask) return;
+  if (!resumeUsableServices.value.find((service) => service.id === resumeService.value)) {
+    toast.error('所选恢复模型渠道尚未通过检测');
+    return;
+  }
+
+  try {
+    await pipelineStore.resumePipeline(taskId, {
+      ai_service: resumeService.value,
+      ai_model: resumeModel.value || undefined,
+    });
+    toast.success(`任务已恢复：${resumeService.value}${resumeModel.value ? ` / ${resumeModel.value}` : ''}`);
+  } catch (error: any) {
+    toast.error(error.message || '恢复失败');
   }
 }
 
@@ -492,6 +611,82 @@ const STEP_LABELS: Record<string, string> = {
   evaluate: '剧本评分',
 };
 
+function isTaskStepPaused(step: { status: string }) {
+  return pipelineStore.currentTask?.status === 'paused' && step.status === 'running';
+}
+
+function isActiveTaskStep(step: { status: string; step_number: number }) {
+  return (step.status === 'running' || isTaskStepPaused(step))
+    && step.step_number === pipelineStore.currentTask?.current_step;
+}
+
+function getActiveTaskModelLabel() {
+  return pipelineStore.currentTask?.ai_model
+    || currentTaskServiceConfig.value?.model
+    || currentTaskServiceMeta.value?.defaultModel
+    || '默认模型';
+}
+
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function getStepElapsedLabel(step: { step_number: number; status: string; started_at?: string; completed_at?: string }) {
+  if (!step.started_at) return '';
+
+  const started = new Date(step.started_at).getTime();
+  if (Number.isNaN(started)) return '';
+
+  let ended: number | null = null;
+
+  if (step.completed_at) {
+    const completed = new Date(step.completed_at).getTime();
+    ended = Number.isNaN(completed) ? null : completed;
+  } else if (isTaskStepPaused(step) && pipelineStore.currentTask?.updated_at) {
+    const pausedAt = new Date(pipelineStore.currentTask.updated_at).getTime();
+    ended = Number.isNaN(pausedAt) ? null : pausedAt;
+  } else if (isActiveTaskStep(step)) {
+    ended = nowTick.value;
+  }
+
+  if (!ended || ended < started) return '';
+  return formatDuration(ended - started);
+}
+
+function getStepLatestAIMetrics(stepNumber: number) {
+  const logs = [...pipelineStore.realtimeLogs].reverse();
+  const targetLog = logs.find((log) => log.step === stepNumber && /\[AI\] 响应成功/.test(log.message));
+
+  if (!targetLog) return null;
+
+  const durationMatch = targetLog.message.match(/耗时(\d+)ms/);
+  const tokenMatch = targetLog.message.match(/tokens=([^·]+)/);
+
+  return {
+    duration: durationMatch ? formatDuration(Number(durationMatch[1])) : '',
+    tokens: tokenMatch?.[1]?.trim() || '',
+  };
+}
+
+function getStepLatestAIMetricsLabel(stepNumber: number) {
+  const metrics = getStepLatestAIMetrics(stepNumber);
+  if (!metrics) return '';
+
+  const parts = [metrics.duration || '—'];
+  if (metrics.tokens) {
+    parts.push(metrics.tokens);
+  }
+
+  return parts.join(' · ');
+}
+
 // 解析故事大纲
 const storyOutline = computed(() => {
   const step = pipelineStore.steps.find(s => s.step_number === 1);
@@ -668,6 +863,10 @@ function formatActLabel(act: string) {
               <span>{{ pipelineStore.currentTask.script_type }}</span>
               <span>|</span>
               <span>{{ pipelineStore.currentTask.total_episodes }}集</span>
+              <span>|</span>
+              <span>{{ pipelineStore.currentTask.ai_service || 'cloudflare-ai' }}</span>
+              <span>|</span>
+              <span>{{ pipelineStore.currentTask.ai_model || '默认模型' }}</span>
               <span :class="[
                 'px-2 py-0.5 rounded text-xs',
                 pipelineStore.currentTask.status === 'completed' ? 'bg-green-500/10 text-green-400' :
@@ -677,13 +876,58 @@ function formatActLabel(act: string) {
                 {{ pipelineStore.currentTask.status === 'completed' ? '已完成' : pipelineStore.currentTask.status === 'running' ? '生成中' : '已暂停' }}
               </span>
             </div>
+            <div class="mt-3 flex flex-wrap gap-2 text-xs">
+              <span class="px-2 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                渠道：{{ currentTaskServiceMeta?.name || pipelineStore.currentTask.ai_service || 'cloudflare-ai' }}
+              </span>
+              <span class="px-2 py-1 rounded-full bg-gray-800 text-gray-200 border border-gray-700">
+                模型：{{ pipelineStore.currentTask.ai_model || currentTaskServiceConfig?.model || currentTaskServiceMeta?.defaultModel || '默认模型' }}
+              </span>
+            </div>
           </div>
           <div class="flex items-center gap-2">
-            <button @click="handleExport" class="btn-secondary text-sm">
+            <button v-if="pipelineStore.isRunning" @click="handlePause" class="btn-secondary text-sm">暂停</button>
+            <button v-if="pipelineStore.isCompleted" @click="handleExport" class="btn-secondary text-sm">
               <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               导出Markdown
             </button>
           </div>
+        </div>
+
+        <div v-if="pipelineStore.isPaused" class="card border-yellow-500/20 bg-yellow-500/5">
+          <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+            <div class="flex-1 grid md:grid-cols-[220px,1fr] gap-3">
+              <div>
+                <label class="block text-xs text-yellow-200 mb-1">恢复渠道</label>
+                <select v-model="resumeService" :disabled="loadingServices" class="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-white focus:outline-none focus:border-yellow-400 disabled:opacity-60">
+                  <option v-for="service in resumeUsableServices" :key="service.id" :value="service.id">{{ service.name }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs text-yellow-200 mb-1">恢复模型</label>
+                <datalist id="detail-resume-models">
+                  <option v-for="modelOption in resumeModelSuggestions" :key="modelOption" :value="modelOption"></option>
+                </datalist>
+                <input v-model="resumeModel" list="detail-resume-models" type="text" class="w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-sm text-white focus:outline-none focus:border-yellow-400" :placeholder="resumeServiceMeta?.defaultModel || '输入模型名称'" />
+                <div v-if="resumeModelSuggestions.length" class="mt-2 flex flex-wrap gap-1.5">
+                  <button v-for="modelOption in resumeModelSuggestions" :key="modelOption" type="button" @click="resumeModel = modelOption" class="px-2 py-0.5 rounded-full border border-gray-700 text-[11px] text-gray-300 hover:border-yellow-400 hover:text-yellow-200 transition-colors">
+                    {{ modelOption }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="handleResume" class="btn-primary text-sm">恢复执行</button>
+            </div>
+          </div>
+          <div class="mt-3 text-xs text-yellow-100/80">默认使用提交任务时选择的模型；你也可以在恢复前切换为当前渠道下的新模型。</div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button @click="handleExport" class="btn-secondary text-sm">
+            <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            导出Markdown
+          </button>
         </div>
 
         <!-- 流水线步骤状态 -->
@@ -705,6 +949,7 @@ function formatActLabel(act: string) {
               class="rounded-lg border overflow-hidden"
               :class="[
                 step.status === 'completed' ? 'border-green-500/30 bg-green-500/5' :
+                isTaskStepPaused(step) ? 'border-yellow-500/30 bg-yellow-500/5' :
                 step.status === 'running' ? 'border-sky-500/50 bg-sky-500/5 animate-pulse' :
                 step.status === 'failed' ? 'border-red-500/30 bg-red-500/5' :
                 'border-gray-700 bg-gray-800/30'
@@ -716,19 +961,29 @@ function formatActLabel(act: string) {
               >
                 <div class="flex items-center gap-3">
                   <div :class="[
-                    'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
+                   'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
                     step.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                    isTaskStepPaused(step) ? 'bg-yellow-500/20 text-yellow-300' :
                     step.status === 'running' ? 'bg-sky-500/20 text-sky-400' :
                     step.status === 'failed' ? 'bg-red-500/20 text-red-400' :
                     'bg-gray-700 text-gray-500'
                   ]">
                     <svg v-if="step.status === 'completed'" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                    <svg v-else-if="isTaskStepPaused(step)" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M6 4h3v12H6zM11 4h3v12h-3z" /></svg>
                     <svg v-else-if="step.status === 'running'" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                     <svg v-else-if="step.status === 'failed'" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                     <span v-else>{{ step.step_number }}</span>
                   </div>
                   <div>
                     <div class="text-white font-medium">{{ STEP_LABELS[step.step_name] || step.step_name }}</div>
+                    <div v-if="isActiveTaskStep(step)" class="mt-1 inline-flex max-w-full rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-gray-200 truncate">
+                      模型：{{ getActiveTaskModelLabel() }}
+                    </div>
+                    <div v-if="getStepElapsedLabel(step)" class="text-[10px] text-gray-400 mt-0.5">耗时：{{ getStepElapsedLabel(step) }}</div>
+                    <div v-if="getStepLatestAIMetrics(step.step_number)" class="text-[10px] text-sky-300 mt-0.5">
+                      最近AI：{{ getStepLatestAIMetricsLabel(step.step_number) }}
+                    </div>
+                    <div v-if="isTaskStepPaused(step)" class="text-yellow-300 text-xs mt-0.5">当前节点已暂停</div>
                     <div v-if="step.error_message" class="text-red-400 text-xs mt-0.5">{{ step.error_message }}</div>
                   </div>
                 </div>

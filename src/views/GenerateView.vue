@@ -28,12 +28,16 @@ const loadingTask = ref(Boolean(initialTaskId));
 const availableServices = ref<AIService[]>([]);
 const configuredServices = ref<AIConfig[]>([]);
 const loadingServices = ref(true);
+const resumeService = ref('cloudflare-ai');
+const resumeModel = ref('');
 
 // Log panel
 const logPanelRef = ref<HTMLElement | null>(null);
 const logs = ref<{ id: number; time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string }[]>([]);
 const expandedLogIds = ref<number[]>([]);
+const nowTick = ref(Date.now());
 let logIdSeed = 1;
+let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -92,6 +96,112 @@ const selectedServiceConfig = computed(() =>
   configuredServices.value.find((item) => item.service_name === formData.value.ai_service),
 );
 
+const currentTaskServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === pipelineStore.currentTask?.ai_service),
+);
+
+const currentTaskServiceConfig = computed(() =>
+  configuredServices.value.find((item) => item.service_name === pipelineStore.currentTask?.ai_service),
+);
+
+const resumeServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === resumeService.value),
+);
+
+const resumeUsableServices = computed(() => usableServices.value);
+const resumeModelSuggestions = computed(() => {
+  const suggestions = [
+    pipelineStore.currentTask?.ai_model,
+    configuredServices.value.find((item) => item.service_name === resumeService.value)?.model,
+    availableServices.value.find((item) => item.id === resumeService.value)?.defaultModel,
+  ].filter((item): item is string => Boolean(item && item.trim()));
+
+  return Array.from(new Set(suggestions));
+});
+
+function syncResumeSelectionFromTask() {
+  const task = pipelineStore.currentTask;
+  if (!task) return;
+  resumeService.value = task.ai_service || 'cloudflare-ai';
+  resumeModel.value = task.ai_model || currentTaskServiceConfig.value?.model || currentTaskServiceMeta.value?.defaultModel || '';
+}
+
+function isTaskStepPaused(step: { status: string }) {
+  return pipelineStore.currentTask?.status === 'paused' && step.status === 'running';
+}
+
+function isActiveTaskStep(step: { status: string; step_number: number }) {
+  return (step.status === 'running' || isTaskStepPaused(step))
+    && step.step_number === pipelineStore.currentTask?.current_step;
+}
+
+function getActiveTaskModelLabel() {
+  return pipelineStore.currentTask?.ai_model
+    || currentTaskServiceConfig.value?.model
+    || currentTaskServiceMeta.value?.defaultModel
+    || '默认模型';
+}
+
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function getStepElapsedLabel(step: { step_number: number; status: string; started_at?: string; completed_at?: string }) {
+  if (!step.started_at) return '';
+
+  const started = new Date(step.started_at).getTime();
+  if (Number.isNaN(started)) return '';
+
+  let ended: number | null = null;
+
+  if (step.completed_at) {
+    const completed = new Date(step.completed_at).getTime();
+    ended = Number.isNaN(completed) ? null : completed;
+  } else if (isTaskStepPaused(step) && pipelineStore.currentTask?.updated_at) {
+    const pausedAt = new Date(pipelineStore.currentTask.updated_at).getTime();
+    ended = Number.isNaN(pausedAt) ? null : pausedAt;
+  } else if (isActiveTaskStep(step)) {
+    ended = nowTick.value;
+  }
+
+  if (!ended || ended < started) return '';
+  return formatDuration(ended - started);
+}
+
+function getStepLatestAIMetrics(stepNumber: number) {
+  const logs = [...pipelineStore.realtimeLogs].reverse();
+  const targetLog = logs.find((log) => log.step === stepNumber && /\[AI\] 响应成功/.test(log.message));
+
+  if (!targetLog) return null;
+
+  const durationMatch = targetLog.message.match(/耗时(\d+)ms/);
+  const tokenMatch = targetLog.message.match(/tokens=([^·]+)/);
+
+  return {
+    duration: durationMatch ? formatDuration(Number(durationMatch[1])) : '',
+    tokens: tokenMatch?.[1]?.trim() || '',
+  };
+}
+
+function getStepLatestAIMetricsLabel(stepNumber: number) {
+  const metrics = getStepLatestAIMetrics(stepNumber);
+  if (!metrics) return '';
+
+  const parts = [metrics.duration || '—'];
+  if (metrics.tokens) {
+    parts.push(metrics.tokens);
+  }
+
+  return parts.join(' · ');
+}
+
 async function loadServices() {
   loadingServices.value = true;
 
@@ -115,6 +225,9 @@ async function loadServices() {
 }
 
 onMounted(async () => {
+  nowTimer = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 1000);
   await loadServices();
   const taskId = initialTaskId;
   if (taskId) {
@@ -132,7 +245,27 @@ onMounted(async () => {
   }
 });
 
-onUnmounted(() => { pipelineStore.closeStream(); });
+watch(() => pipelineStore.currentTask?.id, () => {
+  syncResumeSelectionFromTask();
+}, { immediate: true });
+
+watch(() => resumeService.value, (serviceId) => {
+  const config = configuredServices.value.find((item) => item.service_name === serviceId);
+  const service = availableServices.value.find((item) => item.id === serviceId);
+  if (serviceId === pipelineStore.currentTask?.ai_service) {
+    resumeModel.value = pipelineStore.currentTask?.ai_model || config?.model || service?.defaultModel || '';
+    return;
+  }
+  resumeModel.value = config?.model || service?.defaultModel || '';
+});
+
+onUnmounted(() => {
+  pipelineStore.closeStream();
+  if (nowTimer) {
+    clearInterval(nowTimer);
+    nowTimer = null;
+  }
+});
 
 function addCharacter() {
   if (newCharacter.value.trim() && !formData.value.characters_input.includes(newCharacter.value.trim())) {
@@ -185,8 +318,16 @@ async function handlePause() {
 
 async function handleResume() {
   if (!pipelineStore.currentTask) return;
-  await pipelineStore.resumePipeline(pipelineStore.currentTask.id);
-  addLog('info', '任务已恢复');
+  if (!resumeUsableServices.value.find((service) => service.id === resumeService.value)) {
+    toast.error('所选恢复模型渠道尚未通过检测');
+    return;
+  }
+
+  await pipelineStore.resumePipeline(pipelineStore.currentTask.id, {
+    ai_service: resumeService.value,
+    ai_model: resumeModel.value || undefined,
+  });
+  addLog('info', `任务已恢复，当前模型：${resumeService.value}${resumeModel.value ? ` / ${resumeModel.value}` : ''}`);
 }
 
 async function handleCancel() {
@@ -396,6 +537,14 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                 {{ pipelineStore.currentTask?.completed_episodes }}/{{ pipelineStore.currentTask?.total_episodes }}集
               </span>
             </div>
+            <div class="mt-2 flex flex-wrap gap-2 text-[11px]">
+              <span class="px-2 py-0.5 rounded-full bg-[#2563EB]/10 text-[#93C5FD] border border-[#2563EB]/20">
+                渠道：{{ currentTaskServiceMeta?.name || pipelineStore.currentTask?.ai_service || 'cloudflare-ai' }}
+              </span>
+              <span class="px-2 py-0.5 rounded-full bg-white/5 text-[#D4D4D4] border border-white/10">
+                模型：{{ pipelineStore.currentTask?.ai_model || currentTaskServiceConfig?.model || currentTaskServiceMeta?.defaultModel || '默认模型' }}
+              </span>
+            </div>
             <!-- Progress bar -->
             <div class="mt-2 h-1 bg-[#2F2F2F] rounded-full overflow-hidden">
               <div class="h-full bg-[#2563EB] rounded-full transition-all duration-500" :style="{ width: `${pipelineStore.progressPercent}%` }"></div>
@@ -417,11 +566,13 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                 <div :class="[
                   'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium flex-shrink-0 relative z-10',
                   step.status === 'completed' ? 'bg-[#2563EB] text-white' :
+                  isTaskStepPaused(step) ? 'bg-yellow-500/20 text-yellow-300' :
                   step.status === 'running' ? 'bg-[#2563EB]/20 text-[#60A5FA]' :
                   step.status === 'failed' ? 'bg-red-500/20 text-red-400' :
                   'bg-[#2F2F2F] text-[#737373]'
                 ]">
                   <svg v-if="step.status === 'completed'" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                  <svg v-else-if="isTaskStepPaused(step)" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M6 4h3v12H6zM11 4h3v12h-3z" /></svg>
                   <span v-else-if="step.status === 'running'" class="inline-flex gap-[2px] items-center">
                     <span class="w-1 h-1 rounded-full bg-current animate-bounce"></span>
                     <span class="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:120ms]"></span>
@@ -429,11 +580,21 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                   </span>
                   <span v-else>{{ step.step_number }}</span>
                 </div>
-                <span v-if="step.status === 'running'" class="absolute inset-0 rounded-full border border-[#60A5FA]/40 animate-ping"></span>
+                <span v-if="step.status === 'running' && !isTaskStepPaused(step)" class="absolute inset-0 rounded-full border border-[#60A5FA]/40 animate-ping"></span>
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="text-xs text-[#D4D4D4]">{{ STEP_LABELS[step.step_name] || step.step_name }}</div>
-                  <div v-if="step.status === 'running'" class="text-[10px] text-[#60A5FA] mt-0.5">执行中...</div>
+                  <div v-if="isActiveTaskStep(step)" class="mt-1 inline-flex max-w-full rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-[#CFCFCF] truncate">
+                    模型：{{ getActiveTaskModelLabel() }}
+                  </div>
+                  <div v-if="getStepElapsedLabel(step)" class="text-[10px] text-[#8A8A8A] mt-0.5">
+                    耗时：{{ getStepElapsedLabel(step) }}
+                  </div>
+                  <div v-if="getStepLatestAIMetrics(step.step_number)" class="text-[10px] text-[#7DD3FC] mt-0.5">
+                    最近AI：{{ getStepLatestAIMetricsLabel(step.step_number) }}
+                  </div>
+                  <div v-if="isTaskStepPaused(step)" class="text-[10px] text-yellow-300 mt-0.5">已暂停</div>
+                  <div v-else-if="step.status === 'running'" class="text-[10px] text-[#60A5FA] mt-0.5">执行中...</div>
                   <div v-if="step.error_message" class="text-[10px] text-red-400 truncate">{{ step.error_message }}</div>
                 </div>
               </div>
@@ -441,12 +602,31 @@ watch(() => pipelineStore.errorLogs, (logs) => {
           </div>
 
           <!-- Controls -->
-          <div class="px-3 py-2 border-t border-[#2F2F2F] flex gap-2">
+          <div class="px-3 py-2 border-t border-[#2F2F2F] space-y-3">
+            <div v-if="pipelineStore.isPaused" class="space-y-2 rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-2.5">
+              <div class="text-[11px] text-yellow-200">恢复执行前可切换模型，默认使用任务启动时的模型。</div>
+              <div class="space-y-2">
+                <select v-model="resumeService" class="w-full rounded-md border border-[#3A3A3A] bg-[#191919] px-2.5 py-2 text-xs text-white">
+                  <option v-for="service in resumeUsableServices" :key="service.id" :value="service.id">{{ service.name }}</option>
+                </select>
+                <input v-model="resumeModel" list="generate-resume-models" type="text" class="w-full rounded-md border border-[#3A3A3A] bg-[#191919] px-2.5 py-2 text-xs text-white" :placeholder="resumeServiceMeta?.defaultModel || '输入模型名称'" />
+                <datalist id="generate-resume-models">
+                  <option v-for="modelOption in resumeModelSuggestions" :key="modelOption" :value="modelOption"></option>
+                </datalist>
+                <div v-if="resumeModelSuggestions.length" class="flex flex-wrap gap-1.5">
+                  <button v-for="modelOption in resumeModelSuggestions" :key="modelOption" type="button" @click="resumeModel = modelOption" class="px-2 py-0.5 rounded-full border border-[#3A3A3A] text-[10px] text-[#D4D4D4] hover:border-[#60A5FA] hover:text-[#93C5FD] transition-colors">
+                    {{ modelOption }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="flex gap-2">
             <button v-if="pipelineStore.isRunning" @click="handlePause" class="btn-secondary flex-1 text-xs py-1.5">暂停</button>
             <button v-if="pipelineStore.isPaused" @click="handleResume" class="btn-primary flex-1 text-xs py-1.5">恢复</button>
             <button v-if="pipelineStore.isRunning || pipelineStore.isPaused" @click="handleCancel" class="btn-secondary flex-1 text-xs py-1.5 text-red-400">取消</button>
             <button v-if="pipelineStore.isCompleted" @click="handleExport" class="btn-primary flex-1 text-xs py-1.5">导出Markdown</button>
             <button v-if="pipelineStore.isCompleted || pipelineStore.currentTask?.status === 'failed'" @click="startNew" class="btn-ghost flex-1 text-xs py-1.5">新建</button>
+            </div>
           </div>
         </div>
 
