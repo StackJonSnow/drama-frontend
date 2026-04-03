@@ -35,6 +35,7 @@ export interface PipelineStep {
   status: 'pending' | 'running' | 'completed' | 'failed';
   content?: string;
   error_message?: string;
+  current_task_summary?: string | null;
   started_at?: string;
   completed_at?: string;
 }
