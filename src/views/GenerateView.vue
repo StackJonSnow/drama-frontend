@@ -38,6 +38,7 @@ const expandedLogIds = ref<number[]>([]);
 const nowTick = ref(Date.now());
 let logIdSeed = 1;
 let nowTimer: ReturnType<typeof setInterval> | null = null;
+const syncedRealtimeLogIds = ref<number[]>([]);
 
 function addLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
   const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -232,11 +233,15 @@ onMounted(async () => {
   const taskId = initialTaskId;
   if (taskId) {
     try {
+      logs.value = [];
+      syncedRealtimeLogIds.value = [];
+      previewStep.value = null;
       await pipelineStore.fetchStatus(taskId);
       await pipelineStore.fetchSteps(taskId);
       hasExistingTask.value = true;
-      logs.value = [];
-      previewStep.value = null;
+      if (pipelineStore.currentTask?.status === 'running') {
+        pipelineStore.connectToStream(taskId);
+      }
     } catch (error: any) {
       toast.error(error.message || '加载任务失败');
     } finally {
@@ -359,6 +364,7 @@ function startNew() {
   pipelineStore.clearCurrentTask();
   hasExistingTask.value = false;
   logs.value = [];
+  syncedRealtimeLogIds.value = [];
   expandedLogIds.value = [];
   previewStep.value = null;
   formData.value = {
@@ -374,11 +380,14 @@ function startNew() {
 const stepPulseClass = 'before:absolute before:-inset-1 before:rounded-xl before:border before:border-[#60A5FA]/40 before:animate-ping';
 
 watch(() => pipelineStore.realtimeLogs, (entries) => {
-  const latest = entries[entries.length - 1];
-  if (!latest) return;
+  const unseenEntries = entries.filter((entry) => !syncedRealtimeLogIds.value.includes(entry.id));
+  if (!unseenEntries.length) return;
 
-  const detail = latest.detail ? `\n${latest.detail}` : undefined;
-  addLog(latest.level, latest.message, detail);
+  unseenEntries.forEach((entry) => {
+    const detail = entry.detail ? `\n${entry.detail}` : undefined;
+    addLog(entry.level, entry.message, detail);
+    syncedRealtimeLogIds.value.push(entry.id);
+  });
 }, { deep: true });
 watch(() => pipelineStore.errorLogs, (logs) => {
   const latest = logs[logs.length - 1];
