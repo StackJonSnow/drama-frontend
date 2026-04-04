@@ -317,6 +317,14 @@ class ApiService {
     return this.request(`/api/studio/prompt-templates/${nodeKey}/reset`, { method: 'POST' });
   }
 
+  async publishPromptTemplate(nodeKey: string, payload: { templateId: number; releaseTag: string }): Promise<ApiResponse<{ templates: any[] }>> {
+    return this.request(`/api/studio/prompt-templates/${nodeKey}/publish`, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async rollbackPromptTemplate(nodeKey: string, payload: { templateId: number }): Promise<ApiResponse<{ templates: any[] }>> {
+    return this.request(`/api/studio/prompt-templates/${nodeKey}/rollback`, { method: 'POST', body: JSON.stringify(payload) });
+  }
+
   setToken(token: string): void {
     this.token = token;
     localStorage.setItem('auth_token', token);

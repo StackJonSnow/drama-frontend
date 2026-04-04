@@ -10,14 +10,29 @@ const templates = ref<any[]>([]);
 const selectedTemplateId = ref<number | null>(null);
 const editor = ref<any | null>(null);
 const draggingNodeIndex = ref<number | null>(null);
+const promptTemplates = ref<any[]>([]);
+
+const promptOptions = computed(() => {
+  const grouped = new Map<string, any>();
+  for (const template of promptTemplates.value) {
+    if (!grouped.has(template.node_key)) {
+      grouped.set(template.node_key, template);
+    }
+  }
+  return Array.from(grouped.values());
+});
 
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === selectedTemplateId.value) || null);
 
 async function loadTemplates() {
   loading.value = true;
   try {
-    const response = await apiService.getWorkflowTemplates();
-    templates.value = response.data?.templates || [];
+    const [workflowResponse, promptResponse] = await Promise.all([
+      apiService.getWorkflowTemplates(),
+      apiService.getPromptTemplates(),
+    ]);
+    templates.value = workflowResponse.data?.templates || [];
+    promptTemplates.value = promptResponse.data?.templates || [];
     if (!selectedTemplateId.value && templates.value.length) {
       const firstId = Number(templates.value[0].id);
       selectedTemplateId.value = firstId;
@@ -188,12 +203,16 @@ onMounted(loadTemplates);
                       <input v-model="node.metadata.category" class="input-field" />
                     </label>
                     <label class="block">
-                      <div class="text-[11px] text-[#737373] mb-1">绑定提示词节点</div>
-                      <input v-model="node.metadata.promptNodeKey" class="input-field" />
+                      <div class="text-[11px] text-[#737373] mb-1">绑定提示词模板</div>
+                      <select v-model="node.metadata.promptNodeKey" class="input-field">
+                        <option v-for="option in promptOptions" :key="option.node_key" :value="option.node_key">
+                          {{ (option.name || option.node_key).replace(/^企业级/, '').trim() || option.node_key }}
+                        </option>
+                      </select>
                     </label>
                   </div>
                   <label class="block mt-3">
-                    <div class="text-[11px] text-[#737373] mb-1">企业说明</div>
+                    <div class="text-[11px] text-[#737373] mb-1">说明</div>
                     <textarea v-model="node.metadata.enterpriseNotes" rows="2" class="input-field"></textarea>
                   </label>
                 </div>
