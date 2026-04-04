@@ -13,13 +13,18 @@ const toast = useToast();
 
 const showSidebar = computed(() => route.meta.requiresAuth);
 
-  const navItems = [
-    { path: '/generate', label: '创作', icon: 'create' },
-    { path: '/history', label: '历史记录', icon: 'history' },
-    { path: '/studio/workflows', label: '工作流', icon: 'flow' },
-    { path: '/studio/prompts', label: '提示词', icon: 'prompt' },
-    { path: '/settings', label: '设置', icon: 'settings' },
-  ];
+const primaryNavItems = [
+  { path: '/generate', label: '新建项目', icon: 'create', description: '从创意到首稿' },
+  { path: '/history', label: '项目库', icon: 'history', description: '查看任务与版本' },
+  { path: '/settings', label: '设置', icon: 'settings', description: '模型与账户' },
+];
+
+const advancedNavItems = [
+  { path: '/studio/workflows', label: '工作流编排', icon: 'flow', description: '节点顺序与流程元信息' },
+  { path: '/studio/prompts', label: '提示词模板', icon: 'prompt', description: '模板治理与版本回滚' },
+];
+
+const advancedNavOpen = ref(route.path.startsWith('/studio'));
 
 const profileMenuOpen = ref(false);
 const profileModalOpen = ref(false);
@@ -173,13 +178,15 @@ onBeforeUnmount(() => {
         </RouterLink>
       </div>
 
-      <nav class="flex-1 px-2 py-3 space-y-0.5">
+      <nav class="flex-1 px-2 py-3 space-y-4 overflow-auto">
+        <div>
+          <div class="px-3 mb-2 text-[11px] uppercase tracking-[0.18em] text-[#666]">创作空间</div>
         <RouterLink
-          v-for="item in navItems"
+          v-for="item in primaryNavItems"
           :key="item.path"
           :to="item.path"
           :class="[
-            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors duration-100',
+            'flex items-start gap-2.5 px-3 py-2.5 rounded-md text-sm transition-colors duration-100',
             route.path === item.path || route.path.startsWith(item.path + '/')
               ? 'bg-[#2F2F2F] text-white'
               : 'text-[#A3A3A3] hover:bg-[#2F2F2F] hover:text-white'
@@ -201,8 +208,49 @@ onBeforeUnmount(() => {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          {{ item.label }}
+          <div class="min-w-0">
+            <div>{{ item.label }}</div>
+            <div class="text-[11px] text-[#737373] mt-0.5">{{ item.description }}</div>
+          </div>
         </RouterLink>
+        </div>
+
+        <div>
+          <button
+            type="button"
+            @click="advancedNavOpen = !advancedNavOpen"
+            class="w-full flex items-center justify-between px-3 mb-2 text-[11px] uppercase tracking-[0.18em] text-[#666] hover:text-[#A3A3A3] transition-colors"
+          >
+            <span>高级控制台</span>
+            <svg class="w-4 h-4 transition-transform" :class="advancedNavOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <div v-if="advancedNavOpen" class="space-y-0.5">
+            <RouterLink
+              v-for="item in advancedNavItems"
+              :key="item.path"
+              :to="item.path"
+              :class="[
+                'flex items-start gap-2.5 px-3 py-2.5 rounded-md text-sm transition-colors duration-100',
+                route.path === item.path || route.path.startsWith(item.path + '/')
+                  ? 'bg-[#2F2F2F] text-white'
+                  : 'text-[#A3A3A3] hover:bg-[#2F2F2F] hover:text-white'
+              ]"
+            >
+              <svg v-if="item.icon === 'flow'" class="w-4 h-4 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h4a2 2 0 012 2v1h4m-8 7h4a2 2 0 002-2v-1h4M7 7a2 2 0 100-4 2 2 0 000 4zm0 14a2 2 0 100-4 2 2 0 000 4zm10-7a2 2 0 100-4 2 2 0 000 4z" />
+              </svg>
+              <svg v-else-if="item.icon === 'prompt'" class="w-4 h-4 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h8M8 14h5m-7 6h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <div class="min-w-0">
+                <div>{{ item.label }}</div>
+                <div class="text-[11px] text-[#737373] mt-0.5">{{ item.description }}</div>
+              </div>
+            </RouterLink>
+          </div>
+        </div>
       </nav>
 
       <div class="relative px-3 py-3 border-t border-[#2F2F2F]">

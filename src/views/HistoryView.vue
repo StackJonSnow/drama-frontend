@@ -69,6 +69,26 @@ const taskStats = computed(() => {
   return stats;
 });
 
+const recentCompletedTask = computed(() =>
+  [...pipelineStore.tasks]
+    .filter((task) => task.status === 'completed')
+    .sort((a, b) => +new Date(b.updated_at || b.created_at) - +new Date(a.updated_at || a.created_at))[0] || null,
+);
+
+const recentActiveTask = computed(() =>
+  [...pipelineStore.tasks]
+    .filter((task) => task.status === 'running' || task.status === 'paused')
+    .sort((a, b) => +new Date(b.updated_at || b.created_at) - +new Date(a.updated_at || a.created_at))[0] || null,
+);
+
+function getPrimaryTaskAction(task: any) {
+  if (task.status === 'running') return { label: '进入工作台', path: `/pipeline/${task.id}/editor` };
+  if (task.status === 'paused') return { label: '恢复项目', path: `/pipeline/${task.id}/editor` };
+  if (task.status === 'completed') return { label: '进入工作台', path: `/pipeline/${task.id}/editor` };
+  if (task.status === 'failed') return { label: '查看失败原因', path: `/pipeline/${task.id}/editor` };
+  return { label: '打开项目', path: `/pipeline/${task.id}/editor` };
+}
+
 const filteredTasks = computed(() => {
   const keyword = taskSearch.value.trim().toLowerCase();
 
@@ -107,10 +127,71 @@ async function handleExport(taskId: string, event: Event) {
     <div class="max-w-6xl mx-auto">
       <div class="flex justify-between items-center mb-6">
         <div>
-          <h1 class="text-lg font-semibold text-white">创作历史</h1>
-          <p class="text-sm text-[#737373]">管理您的剧本和生成任务</p>
+          <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-2">Project Library / Writer Room Archive</div>
+          <h1 class="text-2xl font-semibold text-white">项目库</h1>
+          <p class="text-sm text-[#737373]">集中查看进行中的项目、已完成版本与可恢复的生成任务。</p>
         </div>
-        <RouterLink to="/generate" class="btn-primary text-sm">新建剧本</RouterLink>
+        <RouterLink to="/generate" class="btn-primary text-sm">创建新项目</RouterLink>
+      </div>
+
+      <div class="grid xl:grid-cols-[1.1fr,0.9fr] gap-4 mb-6">
+        <div class="card !p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">当前创作焦点</div>
+              <div class="text-base font-semibold text-white">{{ recentActiveTask?.title || '暂无活跃项目' }}</div>
+            </div>
+            <span class="text-[11px] px-2 py-1 rounded-full" :class="recentActiveTask ? 'bg-yellow-500/10 text-yellow-300 border border-yellow-500/20' : 'bg-[#2F2F2F] text-[#737373]'">
+              {{ recentActiveTask ? getStatusLabel(recentActiveTask.status) : '空闲中' }}
+            </span>
+          </div>
+          <div v-if="recentActiveTask" class="space-y-3">
+            <div class="text-sm text-[#A3A3A3]">{{ recentActiveTask.genre }} · {{ recentActiveTask.total_episodes }} 集 · 当前在 {{ getStepLabel(['', 'story_outline', 'characters', 'plot_structure', 'episode_plan', 'scenes', 'dialogue', 'compose', 'evaluate'][recentActiveTask.current_step] || '') }}</div>
+            <div class="h-2 bg-[#2F2F2F] rounded-full overflow-hidden">
+              <div class="h-full bg-[#2563EB]" :style="{ width: `${recentActiveTask.total_episodes > 0 ? (recentActiveTask.completed_episodes / recentActiveTask.total_episodes * 100) : 0}%` }"></div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-[#737373]">
+              <span>已完成 {{ recentActiveTask.completed_episodes }}/{{ recentActiveTask.total_episodes }} 集</span>
+              <span>{{ formatDate(recentActiveTask.updated_at || recentActiveTask.created_at) }}</span>
+            </div>
+            <RouterLink :to="getPrimaryTaskAction(recentActiveTask).path" class="btn-secondary text-sm inline-flex">{{ getPrimaryTaskAction(recentActiveTask).label }}</RouterLink>
+          </div>
+          <div v-else class="text-sm text-[#737373]">暂无运行中或暂停中的项目，可直接新建一个项目开始创作。</div>
+        </div>
+
+        <div class="card !p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">最近可交付版本</div>
+              <div class="text-base font-semibold text-white">{{ recentCompletedTask?.title || '暂无已完成项目' }}</div>
+            </div>
+            <span class="px-2 py-1 rounded-full text-[11px]" :class="recentCompletedTask ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-[#2F2F2F] text-[#737373]'">
+              {{ recentCompletedTask ? '可进入工作台' : '等待首个成稿' }}
+            </span>
+          </div>
+          <div v-if="recentCompletedTask" class="space-y-3">
+            <div class="text-sm text-[#A3A3A3]">{{ recentCompletedTask.genre }} · {{ recentCompletedTask.total_episodes }} 集 · 已生成完成</div>
+            <div class="grid grid-cols-3 gap-3 text-center">
+              <div class="rounded-xl border border-[#2F2F2F] bg-[#202020] p-3">
+                <div class="text-[11px] text-[#737373] mb-1">状态</div>
+                <div class="text-sm text-emerald-300 font-medium">已完成</div>
+              </div>
+              <div class="rounded-xl border border-[#2F2F2F] bg-[#202020] p-3">
+                <div class="text-[11px] text-[#737373] mb-1">集数</div>
+                <div class="text-sm text-white font-medium">{{ recentCompletedTask.total_episodes }}</div>
+              </div>
+              <div class="rounded-xl border border-[#2F2F2F] bg-[#202020] p-3">
+                <div class="text-[11px] text-[#737373] mb-1">更新</div>
+                <div class="text-sm text-white font-medium">{{ new Date(recentCompletedTask.updated_at || recentCompletedTask.created_at).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) }}</div>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <RouterLink :to="`/pipeline/${recentCompletedTask.id}`" class="btn-secondary text-sm">进入工作台</RouterLink>
+              <RouterLink :to="`/pipeline/${recentCompletedTask.id}/editor`" class="btn-primary text-sm">编辑成稿</RouterLink>
+            </div>
+          </div>
+          <div v-else class="text-sm text-[#737373]">完成项目后，你可以在这里直接进入工作台或成稿编辑器。</div>
+        </div>
       </div>
 
       <div class="grid md:grid-cols-4 gap-3 mb-6">
@@ -182,7 +263,7 @@ async function handleExport(taskId: string, event: Event) {
         </div>
         <div v-else class="space-y-2">
           <div v-for="task in filteredTasks" :key="task.id"
-            @click="router.push(`/generate?taskId=${task.id}`)"
+            @click="router.push(getPrimaryTaskAction(task).path)"
             class="card hover:border-[#404040] transition-colors cursor-pointer">
             <div class="flex items-start justify-between">
               <div class="min-w-0 flex-1">
@@ -200,6 +281,7 @@ async function handleExport(taskId: string, event: Event) {
                   <span>{{ task.total_episodes }}集</span>
                   <span>步骤 {{ task.current_step }}/8</span>
                   <span>已完成 {{ task.completed_episodes }}集</span>
+                  <span>动作：{{ getPrimaryTaskAction(task).label }}</span>
                 </div>
                 <!-- Progress bar -->
                 <div class="mt-2 h-1 bg-[#2F2F2F] rounded-full overflow-hidden">
@@ -207,16 +289,21 @@ async function handleExport(taskId: string, event: Event) {
                 </div>
                 <div class="mt-1 text-[10px] text-[#525252]">{{ formatDate(task.created_at) }}</div>
               </div>
-              <button 
-                @click="handleExport(task.id, $event)"
-                :disabled="exportingTaskId === task.id"
-                class="ml-3 px-3 py-1.5 text-xs rounded bg-[#2F2F2F] text-[#A3A3A3] hover:bg-[#404040] hover:text-white transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed">
-                <svg v-if="exportingTaskId === task.id" class="w-3 h-3 mr-1 inline animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                </svg>
-                {{ exportingTaskId === task.id ? '导出中...' : '导出Markdown' }}
-              </button>
+              <div class="ml-3 flex flex-col items-end gap-2 flex-shrink-0">
+                <RouterLink :to="getPrimaryTaskAction(task).path" class="px-3 py-1.5 text-xs rounded bg-[#2F2F2F] text-[#E5E5E5] hover:bg-[#404040] transition-colors">
+                  {{ getPrimaryTaskAction(task).label }}
+                </RouterLink>
+                <button 
+                  @click="handleExport(task.id, $event)"
+                  :disabled="exportingTaskId === task.id"
+                  class="px-3 py-1.5 text-xs rounded bg-[#181818] text-[#A3A3A3] hover:bg-[#2A2A2A] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                  <svg v-if="exportingTaskId === task.id" class="w-3 h-3 mr-1 inline animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                  {{ exportingTaskId === task.id ? '导出中...' : '导出Markdown' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>

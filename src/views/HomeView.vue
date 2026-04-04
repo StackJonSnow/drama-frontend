@@ -18,7 +18,7 @@ const authStore = useAuthStore();
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               </div>
-              <span class="text-xl font-bold gradient-text">AI剧本生成器</span>
+              <span class="text-xl font-bold gradient-text">AI 编剧工作室</span>
             </RouterLink>
           </div>
           
@@ -66,15 +66,17 @@ const authStore = useAuthStore();
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <!-- Hero部分 -->
       <div class="text-center mb-16">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary-500/20 bg-primary-500/10 text-primary-300 text-xs mb-6">
+          企业级剧本研发工作流 / AI Assisted Writer's Room
+        </div>
         <h1 class="text-5xl md:text-6xl font-bold mb-6">
-          <span class="gradient-text">AI驱动</span>
+          <span class="gradient-text">从创意到定稿</span>
           <br>
-          <span class="text-white">剧本创作新时代</span>
+          <span class="text-white">一体化网剧编剧工作台</span>
         </h1>
         <p class="text-xl text-gray-400 max-w-3xl mx-auto mb-8">
-          利用先进的人工智能技术，快速生成专业级剧本。
-          支持电影、电视剧、短视频、广告等多种类型，
-          让创意无限延伸。
+          将剧本生成、流程编排、提示词治理、版本比较与成稿编辑整合进同一个工作空间。
+          面向网剧、短剧与连续剧开发团队，构建更稳定、更可控的 AI 创作生产线。
         </p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
           <RouterLink 
@@ -82,7 +84,7 @@ const authStore = useAuthStore();
             to="/generate" 
             class="btn-primary text-lg px-8 py-4"
           >
-            立即开始创作
+                创建新项目
           </RouterLink>
           <RouterLink 
             v-else
@@ -95,7 +97,7 @@ const authStore = useAuthStore();
             to="/generate" 
             class="btn-secondary text-lg px-8 py-4"
           >
-            了解更多
+            进入项目库
           </RouterLink>
         </div>
       </div>
@@ -108,11 +110,10 @@ const authStore = useAuthStore();
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-2">极速生成</h3>
-          <p class="text-gray-400">
-            基于Cloudflare边缘网络，毫秒级响应，
-            让您的创意瞬间变为现实。
-          </p>
+           <h3 class="text-xl font-semibold text-white mb-2">项目化创作</h3>
+           <p class="text-gray-400">
+             从 logline、角色设定到成稿编辑，以项目维度统一管理，避免创意、版本与执行链路分散。
+           </p>
         </div>
 
         <div class="card group">
@@ -121,11 +122,10 @@ const authStore = useAuthStore();
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
             </svg>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-2">多模型支持</h3>
-          <p class="text-gray-400">
-            支持Cloudflare AI、OpenAI、Claude等多种AI模型，
-            满足不同创作需求。
-          </p>
+           <h3 class="text-xl font-semibold text-white mb-2">可控 AI 流程</h3>
+           <p class="text-gray-400">
+             支持工作流编排、提示词模板治理、多模型切换与节点级日志，让生成过程可观察、可复用、可审计。
+           </p>
         </div>
 
         <div class="card group">
@@ -134,32 +134,31 @@ const authStore = useAuthStore();
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
           </div>
-          <h3 class="text-xl font-semibold text-white mb-2">安全可靠</h3>
-          <p class="text-gray-400">
-            您的创作内容和个人数据得到最高级别的保护，
-            隐私安全有保障。
-          </p>
+           <h3 class="text-xl font-semibold text-white mb-2">版本与编辑闭环</h3>
+           <p class="text-gray-400">
+             支持版本快照、差异对比、结构化编辑和草稿保存，让 AI 初稿真正进入团队可用的改稿流程。
+           </p>
         </div>
       </div>
 
       <!-- 支持类型 -->
       <div class="text-center mb-16">
-        <h2 class="text-3xl font-bold text-white mb-8">支持多种剧本类型</h2>
+        <h2 class="text-3xl font-bold text-white mb-8">适合影视内容团队的核心能力</h2>
         <div class="flex flex-wrap justify-center gap-4">
           <div class="px-6 py-3 bg-dark-800/50 border border-dark-600 rounded-full text-gray-300 hover:border-primary-500 hover:text-white transition-all">
-            电影剧本
+            网剧开发
           </div>
           <div class="px-6 py-3 bg-dark-800/50 border border-dark-600 rounded-full text-gray-300 hover:border-primary-500 hover:text-white transition-all">
-            电视剧本
+            短剧策划
           </div>
           <div class="px-6 py-3 bg-dark-800/50 border border-dark-600 rounded-full text-gray-300 hover:border-primary-500 hover:text-white transition-all">
-            短视频脚本
+            流程编排
           </div>
           <div class="px-6 py-3 bg-dark-800/50 border border-dark-600 rounded-full text-gray-300 hover:border-primary-500 hover:text-white transition-all">
-            广告脚本
+            提示词治理
           </div>
           <div class="px-6 py-3 bg-dark-800/50 border border-dark-600 rounded-full text-gray-300 hover:border-primary-500 hover:text-white transition-all">
-            小说大纲
+            版本对比
           </div>
         </div>
       </div>
@@ -167,9 +166,9 @@ const authStore = useAuthStore();
       <!-- CTA -->
       <div class="text-center">
         <div class="card max-w-2xl mx-auto">
-          <h2 class="text-2xl font-bold text-white mb-4">准备好开始创作了吗？</h2>
+          <h2 class="text-2xl font-bold text-white mb-4">准备好把 AI 接入你的编剧流程了吗？</h2>
           <p class="text-gray-400 mb-6">
-            加入我们，体验AI驱动的剧本创作，释放您的创意潜能。
+            用一个统一工作台管理创意输入、生成过程、编辑改稿与版本沉淀。
           </p>
           <RouterLink 
             v-if="!authStore.isAuthenticated"
@@ -183,7 +182,7 @@ const authStore = useAuthStore();
             to="/generate" 
             class="btn-primary"
           >
-            开始创作
+            创建新项目
           </RouterLink>
         </div>
       </div>
@@ -193,7 +192,7 @@ const authStore = useAuthStore();
     <footer class="border-t border-dark-700/50 mt-16">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div class="text-center text-gray-500">
-          <p>&copy; 2026 AI剧本生成器. 基于Cloudflare Workers构建.</p>
+          <p>&copy; 2026 AI 编剧工作室. 为网剧内容团队打造的 AI 协作生产台.</p>
         </div>
       </div>
     </footer>
