@@ -13,11 +13,13 @@ const toast = useToast();
 
 const showSidebar = computed(() => route.meta.requiresAuth);
 
-const navItems = [
-  { path: '/generate', label: '创作', icon: 'create' },
-  { path: '/history', label: '历史记录', icon: 'history' },
-  { path: '/settings', label: '设置', icon: 'settings' },
-];
+  const navItems = [
+    { path: '/generate', label: '创作', icon: 'create' },
+    { path: '/history', label: '历史记录', icon: 'history' },
+    { path: '/studio/workflows', label: '工作流', icon: 'flow' },
+    { path: '/studio/prompts', label: '提示词', icon: 'prompt' },
+    { path: '/settings', label: '设置', icon: 'settings' },
+  ];
 
 const profileMenuOpen = ref(false);
 const profileModalOpen = ref(false);
@@ -188,6 +190,12 @@ onBeforeUnmount(() => {
           </svg>
           <svg v-else-if="item.icon === 'history'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <svg v-else-if="item.icon === 'flow'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h4a2 2 0 012 2v1h4m-8 7h4a2 2 0 002-2v-1h4M7 7a2 2 0 100-4 2 2 0 000 4zm0 14a2 2 0 100-4 2 2 0 000 4zm10-7a2 2 0 100-4 2 2 0 000 4z" />
+          </svg>
+          <svg v-else-if="item.icon === 'prompt'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 10h8M8 14h5m-7 6h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <svg v-else-if="item.icon === 'settings'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

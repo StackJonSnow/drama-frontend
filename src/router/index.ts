@@ -57,6 +57,24 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/studio/workflows',
+    name: 'WorkflowStudio',
+    component: () => import('@/views/WorkflowStudioView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/studio/prompts',
+    name: 'PromptStudio',
+    component: () => import('@/views/PromptStudioView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/pipeline/:id/editor',
+    name: 'ScriptWorkbench',
+    component: () => import('@/views/ScriptWorkbenchView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
