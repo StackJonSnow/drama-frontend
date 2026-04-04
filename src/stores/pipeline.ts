@@ -161,6 +161,7 @@ export const usePipelineStore = defineStore('pipeline', () => {
     characters_input?: string[];
     scene_input?: string;
     ai_service: string;
+    workflow_template_id?: number;
     total_episodes: number;
   }) {
     generating.value = true;

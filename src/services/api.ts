@@ -165,9 +165,10 @@ class ApiService {
     character_count?: number;
     key_points?: string[];
     characters_input?: string[];
-    scene_input?: string;
-    ai_service: string;
-    total_episodes: number;
+      scene_input?: string;
+      ai_service: string;
+      workflow_template_id?: number;
+      total_episodes: number;
   }): Promise<ApiResponse<{ taskId: string }>> {
     return this.request('/api/pipeline/start', {
       method: 'POST',
@@ -261,6 +262,59 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  async comparePipelineVersions(taskId: string, payload: { baseVersionId: number; targetVersionId: number }): Promise<ApiResponse<{ baseVersion: any; targetVersion: any; diff: any[] }>> {
+    return this.request(`/api/pipeline/${taskId}/versions/compare`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPipelineEditor(taskId: string): Promise<ApiResponse<{ draft: any; content: string; title: string; sourceVersion: any }>> {
+    return this.request(`/api/pipeline/${taskId}/editor`);
+  }
+
+  async savePipelineDraft(taskId: string, payload: { title?: string; content: string; sourceVersionId?: number | null }): Promise<ApiResponse> {
+    return this.request(`/api/pipeline/${taskId}/editor`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async publishPipelineDraft(taskId: string, payload: { label?: string; changeNotes?: string; content?: string }): Promise<ApiResponse<{ version: any }>> {
+    return this.request(`/api/pipeline/${taskId}/editor/publish`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getWorkflowTemplates(): Promise<ApiResponse<{ templates: any[] }>> {
+    return this.request('/api/studio/workflows');
+  }
+
+  async getWorkflowTemplate(templateId: number): Promise<ApiResponse<{ template: any }>> {
+    return this.request(`/api/studio/workflows/${templateId}`);
+  }
+
+  async createWorkflowTemplate(payload: { name: string; description?: string; is_default?: boolean; nodes: any[] }): Promise<ApiResponse<{ template: any }>> {
+    return this.request('/api/studio/workflows', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  async updateWorkflowTemplate(templateId: number, payload: { name?: string; description?: string; is_default?: boolean; nodes: any[] }): Promise<ApiResponse<{ template: any }>> {
+    return this.request(`/api/studio/workflows/${templateId}`, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async getPromptTemplates(): Promise<ApiResponse<{ templates: any[] }>> {
+    return this.request('/api/studio/prompt-templates');
+  }
+
+  async updatePromptTemplate(nodeKey: string, payload: { name?: string; description?: string; system_prompt: string; task_instruction: string; extra_rules: string[]; model_config?: any }): Promise<ApiResponse<{ templates: any[] }>> {
+    return this.request(`/api/studio/prompt-templates/${nodeKey}`, { method: 'PUT', body: JSON.stringify(payload) });
+  }
+
+  async resetPromptTemplate(nodeKey: string): Promise<ApiResponse<{ template: any }>> {
+    return this.request(`/api/studio/prompt-templates/${nodeKey}/reset`, { method: 'POST' });
   }
 
   setToken(token: string): void {
