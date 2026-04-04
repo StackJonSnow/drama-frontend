@@ -18,7 +18,7 @@ const formData = ref({
   style: '', target_platform: '', target_duration: 60,
   character_count: 5, key_points: [] as string[],
   characters_input: [] as string[], scene_input: '',
-  ai_service: 'cloudflare-ai', total_episodes: 50,
+  ai_service: 'cloudflare-ai', workflow_template_id: undefined as number | undefined, total_episodes: 50,
 });
 
 const newCharacter = ref('');
@@ -27,6 +27,7 @@ const hasExistingTask = ref(false);
 const loadingTask = ref(Boolean(initialTaskId));
 const availableServices = ref<AIService[]>([]);
 const configuredServices = ref<AIConfig[]>([]);
+const workflowTemplates = ref<any[]>([]);
 const loadingServices = ref(true);
 const resumeService = ref('cloudflare-ai');
 const resumeModel = ref('');
@@ -242,13 +243,19 @@ async function loadServices() {
   loadingServices.value = true;
 
   try {
-    const [servicesResponse, configResponse] = await Promise.all([
+    const [servicesResponse, configResponse, workflowResponse] = await Promise.all([
       apiService.getAIServices(),
       apiService.getAIConfig(),
+      apiService.getWorkflowTemplates(),
     ]);
 
     availableServices.value = servicesResponse.data?.services || [];
     configuredServices.value = configResponse.data?.configs || [];
+    workflowTemplates.value = workflowResponse.data?.templates || [];
+
+    if (!formData.value.workflow_template_id && workflowTemplates.value.length) {
+      formData.value.workflow_template_id = workflowTemplates.value.find((item) => item.is_default)?.id || workflowTemplates.value[0]?.id;
+    }
 
     if (!usableServices.value.find((service) => service.id === formData.value.ai_service)) {
       formData.value.ai_service = usableServices.value[0]?.id || 'cloudflare-ai';
@@ -340,7 +347,7 @@ async function startPipeline() {
       key_points: formData.value.key_points.length ? formData.value.key_points : undefined,
       characters_input: formData.value.characters_input.length ? formData.value.characters_input : undefined,
       scene_input: formData.value.scene_input || undefined,
-      ai_service: formData.value.ai_service, total_episodes: formData.value.total_episodes,
+      ai_service: formData.value.ai_service, workflow_template_id: formData.value.workflow_template_id, total_episodes: formData.value.total_episodes,
     });
     addLog('success', `任务已启动: ${taskId}`);
     hasExistingTask.value = true;
@@ -407,7 +414,7 @@ function startNew() {
   formData.value = {
     title: '', genre: '', script_type: 'tv', style: '', target_platform: '',
     target_duration: 60, character_count: 5, key_points: [], characters_input: [],
-    scene_input: '', ai_service: 'cloudflare-ai', total_episodes: 50,
+    scene_input: '', ai_service: 'cloudflare-ai', workflow_template_id: workflowTemplates.value.find((item) => item.is_default)?.id || workflowTemplates.value[0]?.id, total_episodes: 50,
   };
   if (!usableServices.value.find((service) => service.id === formData.value.ai_service)) {
     formData.value.ai_service = usableServices.value[0]?.id || 'cloudflare-ai';
@@ -494,6 +501,15 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                 <label class="block text-xs text-[#A3A3A3] mb-1.5">目标平台</label>
                 <input v-model="formData.target_platform" type="text" class="input-field" placeholder="如：优酷" />
               </div>
+            </div>
+            <div>
+              <label class="block text-xs text-[#A3A3A3] mb-1.5">工作流模板</label>
+              <select v-model="formData.workflow_template_id" class="input-field">
+                <option v-for="template in workflowTemplates" :key="template.id" :value="template.id">
+                  {{ template.name }}{{ template.is_default ? '（默认）' : '' }}
+                </option>
+              </select>
+              <div class="mt-1 text-[11px] text-[#737373]">流程编排、节点元信息与执行顺序由所选模板决定，可在「工作流」页维护。</div>
             </div>
             <div>
               <label class="block text-xs text-[#A3A3A3] mb-1.5">背景描述</label>
