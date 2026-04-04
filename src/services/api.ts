@@ -151,6 +151,28 @@ class ApiService {
     });
   }
 
+  async autofillProjectParams(payload: {
+    genre: string;
+    script_type: string;
+    ai_service: string;
+    generation_mode?: 'conservative' | 'balanced' | 'wild';
+  }): Promise<ApiResponse<{ suggestion: {
+    title?: string;
+    style?: string;
+    target_platform?: string;
+    target_duration?: number;
+    total_episodes?: number;
+    character_count?: number;
+    key_points?: string[];
+    characters_input?: string[];
+    scene_input?: string;
+  } }>> {
+    return this.request('/api/ai/project-autofill', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   // ============================================
   // Pipeline API
   // ============================================

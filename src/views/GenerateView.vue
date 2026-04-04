@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { computed, ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { usePipelineStore } from '@/stores/pipeline';
 import { useToast } from '@/composables/useToast';
 import apiService from '@/services/api';
@@ -8,10 +8,8 @@ import type { AIConfig, AIService, ScriptType } from '@/types';
 import { GENRE_OPTIONS, SCRIPT_TYPE_OPTIONS } from '@/types';
 
 const router = useRouter();
-const route = useRoute();
 const pipelineStore = usePipelineStore();
 const toast = useToast();
-const initialTaskId = typeof route.query.taskId === 'string' ? route.query.taskId : '';
 
 const formData = ref({
   title: '', genre: '', script_type: 'tv' as ScriptType,
@@ -23,93 +21,52 @@ const formData = ref({
 
 const newCharacter = ref('');
 const newKeyPoint = ref('');
+const autofilling = ref(false);
+const autofillMode = ref<'conservative' | 'balanced' | 'wild'>('balanced');
+const autofillPolicy = ref<'overwrite' | 'fill-empty'>('overwrite');
+const loadingTask = ref(false);
 const hasExistingTask = ref(false);
-const loadingTask = ref(Boolean(initialTaskId));
 const availableServices = ref<AIService[]>([]);
 const configuredServices = ref<AIConfig[]>([]);
 const workflowTemplates = ref<any[]>([]);
 const loadingServices = ref(true);
 const resumeService = ref('cloudflare-ai');
 const resumeModel = ref('');
-
-// Log panel
-const logPanelRef = ref<HTMLElement | null>(null);
-const logs = ref<{ id: number; time: string; type: 'info' | 'success' | 'warning' | 'error'; message: string; detail?: string; isStream?: boolean }[]>([]);
-const expandedLogIds = ref<number[]>([]);
-const nowTick = ref(Date.now());
-let logIdSeed = 1;
-let nowTimer: ReturnType<typeof setInterval> | null = null;
-const syncedRealtimeLogIds = ref<number[]>([]);
-const logFilter = ref<'all' | 'summary'>('all');
-
-function addLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
-  const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  logs.value.push({ id: logIdSeed++, time, type, message, detail });
-  nextTick(() => {
-    if (logPanelRef.value) logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight;
-  });
-}
-
-function addOrMergeStreamLog(type: 'info' | 'success' | 'warning' | 'error', message: string, detail?: string) {
-  const existing = [...logs.value].reverse().find((log) => log.isStream && log.type === type && log.message === message);
-
-  if (!existing) {
-    const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    logs.value.push({ id: logIdSeed++, time, type, message, detail, isStream: true });
-  } else {
-    existing.detail = `${existing.detail || ''}${detail || ''}`;
-    existing.time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  nextTick(() => {
-    if (logPanelRef.value) logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight;
-  });
-}
-
-function shouldCollapseDetail(detail?: string) {
-  return Boolean(detail && detail.length > 700);
-}
-
-function isLogExpanded(id: number) {
-  return expandedLogIds.value.includes(id);
-}
-
-function toggleLogExpanded(id: number) {
-  if (isLogExpanded(id)) {
-    expandedLogIds.value = expandedLogIds.value.filter((item) => item !== id);
-    return;
-  }
-
-  expandedLogIds.value = [...expandedLogIds.value, id];
-}
-
-function getVisibleDetail(log: { id: number; detail?: string }) {
-  if (!log.detail) return '';
-  if (isLogExpanded(log.id) || !shouldCollapseDetail(log.detail)) return log.detail;
-  return `${log.detail.slice(0, 700)}\n\n...（已折叠 ${log.detail.length - 700} 个字符）`;
-}
-
-function isSummaryLog(log: { message: string }) {
-  return log.message === '[Current Task Summary]';
-}
-
-const visibleLogs = computed(() => {
-  if (logFilter.value === 'summary') {
-    return logs.value.filter((log) => isSummaryLog(log));
-  }
-  return logs.value;
-});
-
-// Step preview
+const currentTaskServiceMeta = computed<any>(() => null);
+const currentTaskServiceConfig = computed<any>(() => null);
+const resumeServiceMeta = computed<any>(() => null);
+const resumeUsableServices = computed<any[]>(() => []);
+const resumeModelSuggestions = computed(() => [] as string[]);
 const previewStep = ref<number | null>(null);
 const stepPreviewContent = ref<any>(null);
 const stepPreviewSummary = ref('');
-
 const STEP_LABELS: Record<string, string> = {
   story_outline: '故事大纲', characters: '角色设定', plot_structure: '剧情结构',
   episode_plan: '集数计划', scenes: '场景生成', dialogue: '对白生成',
   compose: '剧本合成', evaluate: '剧本评分',
 };
+const visibleLogs = computed(() => [] as Array<{ id: number; time: string; type: string; message: string; detail?: string }>);
+const logFilter = ref<'all' | 'summary'>('all');
+const logs = ref<any[]>([]);
+const logPanelRef = ref<HTMLElement | null>(null);
+
+function isTaskStepPaused(_: { status: string }) { return false; }
+function isActiveTaskStep(_: { status: string; step_number: number }) { return false; }
+function getActiveTaskModelLabel() { return '默认模型'; }
+function getStepElapsedLabel(_: any) { return ''; }
+function getStepLatestAIMetrics(_: number) { return null; }
+function getStepLatestAIMetricsLabel(_: number) { return ''; }
+function getStepSummaryPreview(_: any) { return ''; }
+function handlePause() { return Promise.resolve(); }
+function handleResume() { return Promise.resolve(); }
+function handleCancel() { return Promise.resolve(); }
+function handleExport() { return Promise.resolve(); }
+function viewStepPreview(_: number) { return Promise.resolve(); }
+function isSummaryLog(_: { message: string }) { return false; }
+function shouldCollapseDetail(detail?: string) { return Boolean(detail && detail.length > 700); }
+function getVisibleDetail(log: { detail?: string }) { return log.detail || ''; }
+function isLogExpanded(_: number) { return false; }
+function toggleLogExpanded(_: number) {}
 
 const usableServices = computed(() => {
   return availableServices.value.filter((service) => {
@@ -127,117 +84,6 @@ const selectedServiceConfig = computed(() =>
   configuredServices.value.find((item) => item.service_name === formData.value.ai_service),
 );
 
-const currentTaskServiceMeta = computed(() =>
-  availableServices.value.find((service) => service.id === pipelineStore.currentTask?.ai_service),
-);
-
-const currentTaskServiceConfig = computed(() =>
-  configuredServices.value.find((item) => item.service_name === pipelineStore.currentTask?.ai_service),
-);
-
-const resumeServiceMeta = computed(() =>
-  availableServices.value.find((service) => service.id === resumeService.value),
-);
-
-const resumeUsableServices = computed(() => usableServices.value);
-const resumeModelSuggestions = computed(() => {
-  const suggestions = [
-    pipelineStore.currentTask?.ai_model,
-    configuredServices.value.find((item) => item.service_name === resumeService.value)?.model,
-    availableServices.value.find((item) => item.id === resumeService.value)?.defaultModel,
-  ].filter((item): item is string => Boolean(item && item.trim()));
-
-  return Array.from(new Set(suggestions));
-});
-
-function syncResumeSelectionFromTask() {
-  const task = pipelineStore.currentTask;
-  if (!task) return;
-  resumeService.value = task.ai_service || 'cloudflare-ai';
-  resumeModel.value = task.ai_model || currentTaskServiceConfig.value?.model || currentTaskServiceMeta.value?.defaultModel || '';
-}
-
-function isTaskStepPaused(step: { status: string }) {
-  return pipelineStore.currentTask?.status === 'paused' && step.status === 'running';
-}
-
-function isActiveTaskStep(step: { status: string; step_number: number }) {
-  return (step.status === 'running' || isTaskStepPaused(step))
-    && step.step_number === pipelineStore.currentTask?.current_step;
-}
-
-function getActiveTaskModelLabel() {
-  return pipelineStore.currentTask?.ai_model
-    || currentTaskServiceConfig.value?.model
-    || currentTaskServiceMeta.value?.defaultModel
-    || '默认模型';
-}
-
-function formatDuration(ms: number) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
-function getStepElapsedLabel(step: { step_number: number; status: string; started_at?: string; completed_at?: string }) {
-  if (!step.started_at) return '';
-
-  const started = new Date(step.started_at).getTime();
-  if (Number.isNaN(started)) return '';
-
-  let ended: number | null = null;
-
-  if (step.completed_at) {
-    const completed = new Date(step.completed_at).getTime();
-    ended = Number.isNaN(completed) ? null : completed;
-  } else if (isTaskStepPaused(step) && pipelineStore.currentTask?.updated_at) {
-    const pausedAt = new Date(pipelineStore.currentTask.updated_at).getTime();
-    ended = Number.isNaN(pausedAt) ? null : pausedAt;
-  } else if (isActiveTaskStep(step)) {
-    ended = nowTick.value;
-  }
-
-  if (!ended || ended < started) return '';
-  return formatDuration(ended - started);
-}
-
-function getStepLatestAIMetrics(stepNumber: number) {
-  const logs = [...pipelineStore.realtimeLogs].reverse();
-  const targetLog = logs.find((log) => log.step === stepNumber && /\[AI\] 响应成功/.test(log.message));
-
-  if (!targetLog) return null;
-
-  const durationMatch = targetLog.message.match(/耗时(\d+)ms/);
-  const tokenMatch = targetLog.message.match(/tokens=([^·]+)/);
-
-  return {
-    duration: durationMatch ? formatDuration(Number(durationMatch[1])) : '',
-    tokens: tokenMatch?.[1]?.trim() || '',
-  };
-}
-
-function getStepLatestAIMetricsLabel(stepNumber: number) {
-  const metrics = getStepLatestAIMetrics(stepNumber);
-  if (!metrics) return '';
-
-  const parts = [metrics.duration || '—'];
-  if (metrics.tokens) {
-    parts.push(metrics.tokens);
-  }
-
-  return parts.join(' · ');
-}
-
-function getStepSummaryPreview(step: { current_task_summary?: string | null }) {
-  const summary = step.current_task_summary?.trim();
-  if (!summary) return '';
-  return summary.length > 84 ? `${summary.slice(0, 84)}…` : summary;
-}
 
 async function loadServices() {
   loadingServices.value = true;
@@ -268,50 +114,7 @@ async function loadServices() {
 }
 
 onMounted(async () => {
-  nowTimer = setInterval(() => {
-    nowTick.value = Date.now();
-  }, 1000);
   await loadServices();
-  const taskId = initialTaskId;
-  if (taskId) {
-    try {
-      logs.value = [];
-      syncedRealtimeLogIds.value = [];
-      previewStep.value = null;
-      await pipelineStore.fetchStatus(taskId);
-      await pipelineStore.fetchSteps(taskId);
-      hasExistingTask.value = true;
-      if (pipelineStore.currentTask?.status === 'running') {
-        pipelineStore.connectToStream(taskId);
-      }
-    } catch (error: any) {
-      toast.error(error.message || '加载任务失败');
-    } finally {
-      loadingTask.value = false;
-    }
-  }
-});
-
-watch(() => pipelineStore.currentTask?.id, () => {
-  syncResumeSelectionFromTask();
-}, { immediate: true });
-
-watch(() => resumeService.value, (serviceId) => {
-  const config = configuredServices.value.find((item) => item.service_name === serviceId);
-  const service = availableServices.value.find((item) => item.id === serviceId);
-  if (serviceId === pipelineStore.currentTask?.ai_service) {
-    resumeModel.value = pipelineStore.currentTask?.ai_model || config?.model || service?.defaultModel || '';
-    return;
-  }
-  resumeModel.value = config?.model || service?.defaultModel || '';
-});
-
-onUnmounted(() => {
-  pipelineStore.closeStream();
-  if (nowTimer) {
-    clearInterval(nowTimer);
-    nowTimer = null;
-  }
 });
 
 function addCharacter() {
@@ -335,8 +138,6 @@ async function startPipeline() {
     toast.error('所选渠道尚未通过检测，请先前往设置页完成检测');
     return;
   }
-  logs.value = [];
-  addLog('info', '正在启动流水线...');
   try {
     const taskId = await pipelineStore.startPipeline({
       title: formData.value.title, genre: formData.value.genre,
@@ -349,68 +150,67 @@ async function startPipeline() {
       scene_input: formData.value.scene_input || undefined,
       ai_service: formData.value.ai_service, workflow_template_id: formData.value.workflow_template_id, total_episodes: formData.value.total_episodes,
     });
-    addLog('success', `任务已启动: ${taskId}`);
-    hasExistingTask.value = true;
+    router.push(`/pipeline/${taskId}/editor`);
   } catch (error: any) {
-    addLog('error', `启动失败: ${error.message}`);
     toast.error(error.message);
   }
 }
 
-async function handlePause() {
-  if (!pipelineStore.currentTask) return;
-  await pipelineStore.pausePipeline(pipelineStore.currentTask.id);
-  addLog('info', '任务已暂停');
-}
-
-async function handleResume() {
-  if (!pipelineStore.currentTask) return;
-  if (!resumeUsableServices.value.find((service) => service.id === resumeService.value)) {
-    toast.error('所选恢复模型渠道尚未通过检测');
+async function autofillWithAI() {
+  if (!formData.value.genre || !formData.value.script_type) {
+    toast.error('请先选择题材和类型');
     return;
   }
 
-  await pipelineStore.resumePipeline(pipelineStore.currentTask.id, {
-    ai_service: resumeService.value,
-    ai_model: resumeModel.value || undefined,
-  });
-  addLog('info', `任务已恢复，当前模型：${resumeService.value}${resumeModel.value ? ` / ${resumeModel.value}` : ''}`);
-}
+  if (!usableServices.value.find((service) => service.id === formData.value.ai_service)) {
+    toast.error('所选渠道尚未通过检测，请先前往设置页完成检测');
+    return;
+  }
 
-async function handleCancel() {
-  if (!pipelineStore.currentTask || !confirm('确定取消？')) return;
-  await pipelineStore.cancelPipeline(pipelineStore.currentTask.id);
-  addLog('info', '任务已取消');
-  hasExistingTask.value = false;
-}
-
-async function handleExport() {
-  if (!pipelineStore.currentTask) return;
+  autofilling.value = true;
   try {
-    const filename = await pipelineStore.exportScript(pipelineStore.currentTask.id);
-    addLog('success', `已导出: ${filename}`);
-  } catch (error: any) { addLog('error', `导出失败: ${error.message}`); }
-}
+    const response = await apiService.autofillProjectParams({
+      genre: formData.value.genre,
+      script_type: formData.value.script_type,
+      ai_service: formData.value.ai_service,
+      generation_mode: autofillMode.value,
+    });
+    const suggestion = response.data?.suggestion || {};
 
-async function viewStepPreview(stepNumber: number) {
-  if (!pipelineStore.currentTask) return;
-  if (previewStep.value === stepNumber) { previewStep.value = null; return; }
-  previewStep.value = stepNumber;
-  try {
-    const data = await pipelineStore.fetchStepContent(pipelineStore.currentTask.id, stepNumber);
-    stepPreviewContent.value = data.content;
-    stepPreviewSummary.value = data.current_task_summary || '';
-  } catch { toast.error('加载步骤内容失败'); }
+    const pickValue = <T>(currentValue: T, nextValue: T) => {
+      if (autofillPolicy.value === 'overwrite') return nextValue;
+      const isEmptyArray = Array.isArray(currentValue) && currentValue.length === 0;
+      const isEmptyString = typeof currentValue === 'string' && !currentValue.trim();
+      const isEmptyNumber = typeof currentValue === 'number' && (!currentValue || Number.isNaN(currentValue));
+      if (isEmptyArray || isEmptyString || isEmptyNumber) {
+        return nextValue;
+      }
+      return currentValue;
+    };
+
+    formData.value = {
+      ...formData.value,
+      title: pickValue(formData.value.title, suggestion.title || formData.value.title),
+      style: pickValue(formData.value.style, suggestion.style || formData.value.style),
+      target_platform: pickValue(formData.value.target_platform, suggestion.target_platform || formData.value.target_platform),
+      target_duration: Number(pickValue(formData.value.target_duration, Number(suggestion.target_duration || formData.value.target_duration || 60))),
+      total_episodes: Number(pickValue(formData.value.total_episodes, Number(suggestion.total_episodes || formData.value.total_episodes || 50))),
+      character_count: Number(pickValue(formData.value.character_count, Number(suggestion.character_count || formData.value.character_count || 5))),
+      key_points: Array.isArray(suggestion.key_points) ? pickValue(formData.value.key_points, suggestion.key_points) : formData.value.key_points,
+      characters_input: Array.isArray(suggestion.characters_input) ? pickValue(formData.value.characters_input, suggestion.characters_input) : formData.value.characters_input,
+      scene_input: pickValue(formData.value.scene_input, suggestion.scene_input || formData.value.scene_input),
+    };
+
+    toast.success(autofillPolicy.value === 'overwrite' ? 'AI 已覆盖填充创作参数，可继续生成或再次重试' : 'AI 已补全空白创作参数');
+  } catch (error: any) {
+    toast.error(error.message || '智能填充失败');
+  } finally {
+    autofilling.value = false;
+  }
 }
 
 function startNew() {
   pipelineStore.clearCurrentTask();
-  hasExistingTask.value = false;
-  logs.value = [];
-  syncedRealtimeLogIds.value = [];
-  expandedLogIds.value = [];
-  previewStep.value = null;
-  stepPreviewSummary.value = '';
   formData.value = {
     title: '', genre: '', script_type: 'tv', style: '', target_platform: '',
     target_duration: 60, character_count: 5, key_points: [], characters_input: [],
@@ -420,27 +220,6 @@ function startNew() {
     formData.value.ai_service = usableServices.value[0]?.id || 'cloudflare-ai';
   }
 }
-
-const stepPulseClass = 'before:absolute before:-inset-1 before:rounded-xl before:border before:border-[#60A5FA]/40 before:animate-ping';
-
-watch(() => pipelineStore.realtimeLogs, (entries) => {
-  const unseenEntries = entries.filter((entry) => !syncedRealtimeLogIds.value.includes(entry.id));
-  if (!unseenEntries.length) return;
-
-  unseenEntries.forEach((entry) => {
-    const detail = entry.detail ? `\n${entry.detail}` : undefined;
-    if (entry.message.startsWith('[AI Output Stream]')) {
-      addOrMergeStreamLog(entry.level, entry.message, detail);
-    } else {
-      addLog(entry.level, entry.message, detail);
-    }
-    syncedRealtimeLogIds.value.push(entry.id);
-  });
-}, { deep: true });
-watch(() => pipelineStore.errorLogs, (logs) => {
-  const latest = logs[logs.length - 1];
-  if (latest) addLog('error', `[Step ${latest.step}] ${latest.message}`);
-}, { deep: true });
 </script>
 
 <template>
@@ -459,10 +238,58 @@ watch(() => pipelineStore.errorLogs, (logs) => {
     <template v-else-if="!hasExistingTask">
       <div class="flex-1 overflow-auto p-6">
         <div class="max-w-2xl mx-auto">
-          <h1 class="text-xl font-semibold text-white mb-1">创作新剧本</h1>
-          <p class="text-sm text-[#737373] mb-6">填写创意信息，AI将通过8步流水线为您生成专业剧本</p>
+          <div class="mb-6">
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-2">New Project / Writer's Room Intake</div>
+            <h1 class="text-2xl font-semibold text-white mb-2">创建新项目</h1>
+            <p class="text-sm text-[#737373]">先定义项目创意、生产策略和模型配置，再进入统一工作台持续生成与改稿。</p>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-3 mb-6">
+            <div class="card !p-4">
+              <div class="text-[11px] text-[#737373] uppercase tracking-wider mb-1">创意输入</div>
+              <div class="text-sm text-white">标题、题材、角色、关键情节点</div>
+            </div>
+            <div class="card !p-4">
+              <div class="text-[11px] text-[#737373] uppercase tracking-wider mb-1">生产策略</div>
+              <div class="text-sm text-white">工作流模板、集数、风格与平台</div>
+            </div>
+            <div class="card !p-4">
+              <div class="text-[11px] text-[#737373] uppercase tracking-wider mb-1">AI 执行</div>
+              <div class="text-sm text-white">模型渠道、运行日志、暂停恢复</div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-[#2563EB]/20 bg-[#2563EB]/5 p-4 mb-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <div class="text-sm font-medium text-white mb-1">AI 智能填充创作参数</div>
+                <div class="text-xs text-[#93C5FD] leading-6">只需先选择题材和类型，即可由 AI 自动生成标题、风格、平台、角色、关键情节点和背景设定。支持多次生成、覆盖填充或仅补全空白字段。</div>
+              </div>
+              <button type="button" @click="autofillWithAI" :disabled="autofilling || !formData.genre || !formData.script_type" class="btn-secondary whitespace-nowrap">
+                {{ autofilling ? '智能生成中...' : 'AI 智能填充' }}
+              </button>
+            </div>
+            <div class="mt-4 flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+              <div class="flex flex-wrap gap-2">
+                <button type="button" @click="autofillMode = 'conservative'" :class="autofillMode === 'conservative' ? 'px-3 py-1.5 rounded-full bg-white text-black text-xs font-medium' : 'px-3 py-1.5 rounded-full border border-[#3B82F6]/30 text-xs text-[#BFDBFE] hover:border-[#60A5FA]'">保守</button>
+                <button type="button" @click="autofillMode = 'balanced'" :class="autofillMode === 'balanced' ? 'px-3 py-1.5 rounded-full bg-[#2563EB] text-white text-xs font-medium' : 'px-3 py-1.5 rounded-full border border-[#3B82F6]/30 text-xs text-[#BFDBFE] hover:border-[#60A5FA]'">平衡</button>
+                <button type="button" @click="autofillMode = 'wild'" :class="autofillMode === 'wild' ? 'px-3 py-1.5 rounded-full bg-fuchsia-500 text-white text-xs font-medium' : 'px-3 py-1.5 rounded-full border border-fuchsia-400/30 text-xs text-fuchsia-200 hover:border-fuchsia-300'">脑洞大</button>
+              </div>
+              <div class="flex items-center gap-3 text-xs text-[#BFDBFE]">
+                <label class="inline-flex items-center gap-2">
+                  <input type="radio" v-model="autofillPolicy" value="overwrite" />
+                  覆盖填充
+                </label>
+                <label class="inline-flex items-center gap-2">
+                  <input type="radio" v-model="autofillPolicy" value="fill-empty" />
+                  只填空字段
+                </label>
+              </div>
+            </div>
+          </div>
 
           <form @submit.prevent="startPipeline" class="space-y-4">
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666]">项目概述</div>
             <div>
               <label class="block text-xs text-[#A3A3A3] mb-1.5">标题 *</label>
               <input v-model="formData.title" type="text" required class="input-field" placeholder="输入剧本标题" />
@@ -502,6 +329,7 @@ watch(() => pipelineStore.errorLogs, (logs) => {
                 <input v-model="formData.target_platform" type="text" class="input-field" placeholder="如：优酷" />
               </div>
             </div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] pt-2">生产配置</div>
             <div>
               <label class="block text-xs text-[#A3A3A3] mb-1.5">工作流模板</label>
               <select v-model="formData.workflow_template_id" class="input-field">
@@ -517,6 +345,7 @@ watch(() => pipelineStore.errorLogs, (logs) => {
             </div>
 
             <!-- Characters -->
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] pt-2">创意要素</div>
             <div>
               <label class="block text-xs text-[#A3A3A3] mb-1.5">指定角色</label>
               <div class="flex gap-2">
@@ -547,6 +376,7 @@ watch(() => pipelineStore.errorLogs, (logs) => {
             </div>
 
             <!-- AI service -->
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] pt-2">AI 执行配置</div>
             <div>
               <div class="flex items-center justify-between gap-3 mb-1.5">
                 <label class="block text-xs text-[#A3A3A3]">AI服务</label>
