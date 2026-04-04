@@ -907,33 +907,23 @@ function formatActLabel(act: string) {
 </script>
 
 <template>
-  <div class="min-h-screen tech-bg grid-bg">
-    <!-- 导航栏 -->
-    <nav class="border-b border-gray-700/50 backdrop-blur-lg bg-gray-900/50">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between h-16 items-center">
-          <RouterLink to="/" class="flex items-center space-x-2">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-500 to-sky-600 flex items-center justify-center">
-              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <span class="text-xl font-bold gradient-text">AI剧本生成器</span>
-          </RouterLink>
-          
-          <div class="flex items-center space-x-4">
-            <RouterLink to="/generate" class="btn-primary text-sm">开始创作</RouterLink>
-            <RouterLink to="/history" class="text-gray-400 hover:text-white transition-colors">历史记录</RouterLink>
-          </div>
-        </div>
-      </div>
-    </nav>
-
-    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <RouterLink to="/generate" class="inline-flex items-center text-gray-400 hover:text-white mb-6 transition-colors">
+  <div class="min-h-full p-6">
+    <main class="max-w-6xl mx-auto space-y-6">
+      <div class="flex items-center justify-between gap-4">
+        <RouterLink to="/history" class="inline-flex items-center text-gray-400 hover:text-white transition-colors">
         <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-        返回
-      </RouterLink>
+        返回项目库
+        </RouterLink>
+        <div class="text-[11px] uppercase tracking-[0.18em] text-[#666]">Advanced Diagnostics / Pipeline Overview</div>
+      </div>
+
+      <div class="rounded-2xl border border-[#2F2F2F] bg-[#202020] p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">Primary Workspace</div>
+          <div class="text-white font-medium">日常创作、恢复项目和改稿，请优先在工作台进行；这里更适合查看执行诊断、步骤细节与版本快照。</div>
+        </div>
+        <RouterLink :to="`/pipeline/${taskId}/editor`" class="btn-primary text-sm whitespace-nowrap">返回工作台</RouterLink>
+      </div>
 
       <div v-if="pipelineStore.loading" class="flex justify-center py-12">
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500"></div>
@@ -974,7 +964,7 @@ function formatActLabel(act: string) {
           </div>
           <div class="flex items-center gap-2">
             <button v-if="pipelineStore.isRunning" @click="handlePause" class="btn-secondary text-sm">暂停</button>
-            <RouterLink :to="`/pipeline/${taskId}/editor`" class="btn-secondary text-sm">编辑剧本</RouterLink>
+            <RouterLink :to="`/pipeline/${taskId}/editor`" class="btn-primary text-sm">进入工作台</RouterLink>
             <button v-if="pipelineStore.isCompleted" @click="handleExport" class="btn-secondary text-sm">
               <svg class="w-4 h-4 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               导出Markdown
@@ -1020,7 +1010,13 @@ function formatActLabel(act: string) {
 
         <!-- 流水线步骤状态 -->
         <div class="card">
-          <h2 class="text-xl font-semibold text-white mb-4">流水线步骤</h2>
+          <div class="flex items-center justify-between mb-4 gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-white">流水线步骤</h2>
+              <p class="text-sm text-gray-400 mt-1">用于诊断执行链路、查看各步骤摘要与输出，不作为主要改稿入口。</p>
+            </div>
+            <RouterLink :to="`/pipeline/${taskId}/editor`" class="text-sm text-sky-300 hover:text-sky-200 transition-colors whitespace-nowrap">去工作台编辑</RouterLink>
+          </div>
           <div class="space-y-2">
             <div
               v-for="step in (pipelineStore.steps.length ? pipelineStore.steps : [
@@ -1112,6 +1108,7 @@ function formatActLabel(act: string) {
             </div>
             <span class="text-xs text-gray-500">{{ visibleRealtimeLogs.length }} 条</span>
           </div>
+          <p class="text-sm text-gray-400 mb-4">当你需要分析模型响应、步骤耗时、上下文摘要与失败原因时，再使用此诊断日志视图。</p>
 
           <div class="max-h-[420px] overflow-y-auto rounded-lg border border-gray-700 bg-gray-950/70 p-4 font-mono text-xs space-y-3">
             <div v-if="!visibleRealtimeLogs.length" class="text-gray-500">暂无实时日志</div>

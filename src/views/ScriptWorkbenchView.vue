@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import apiService from '@/services/api';
 import { useToast } from '@/composables/useToast';
+import { usePipelineStore } from '@/stores/pipeline';
+import type { AIConfig, AIService } from '@/types';
 
 const route = useRoute();
 const toast = useToast();
+const pipelineStore = usePipelineStore();
 const taskId = route.params.id as string;
 
 const loading = ref(true);
@@ -24,6 +27,12 @@ type ScreenplayBlock = { id: string; type: ScreenplayBlockType; text: string };
 
 const screenplayBlocks = ref<ScreenplayBlock[]>([]);
 const selectedBlockId = ref<string | null>(null);
+const availableServices = ref<AIService[]>([]);
+const configuredServices = ref<AIConfig[]>([]);
+const loadingServices = ref(false);
+const resuming = ref(false);
+const resumeService = ref('cloudflare-ai');
+const resumeModel = ref('');
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 const sceneHeadingPresets = [
   '## 场景 1',
@@ -33,6 +42,38 @@ const sceneHeadingPresets = [
 ];
 
 const diffRows = computed(() => compareResult.value?.diff || []);
+const task = computed(() => pipelineStore.currentTask);
+const recentLogs = computed(() => pipelineStore.realtimeLogs.slice(-10));
+const taskStepName = computed(() => {
+  const step = pipelineStore.steps.find((item) => item.step_number === task.value?.current_step);
+  return step?.step_name || '';
+});
+const currentStepSummary = computed(() => {
+  const step = pipelineStore.steps.find((item) => item.step_number === task.value?.current_step);
+  return step?.current_task_summary || '';
+});
+const currentTaskServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === task.value?.ai_service),
+);
+const currentTaskServiceConfig = computed(() =>
+  configuredServices.value.find((item) => item.service_name === task.value?.ai_service),
+);
+const resumeUsableServices = computed(() => availableServices.value.filter((service) => {
+  if (service.id === 'cloudflare-ai') return true;
+  const config = configuredServices.value.find((item) => item.service_name === service.id);
+  return config?.validation_status === 'passed';
+}));
+const resumeServiceMeta = computed(() =>
+  availableServices.value.find((service) => service.id === resumeService.value),
+);
+const resumeModelSuggestions = computed(() => {
+  const suggestions = [
+    task.value?.ai_model,
+    configuredServices.value.find((item) => item.service_name === resumeService.value)?.model,
+    availableServices.value.find((item) => item.id === resumeService.value)?.defaultModel,
+  ].filter((item): item is string => Boolean(item && item.trim()));
+  return Array.from(new Set(suggestions));
+});
 const sceneNavigator = computed(() => {
   return screenplayBlocks.value
     .map((block, index) => ({ block, index }))
@@ -136,22 +177,37 @@ function syncBlocksFromContent(raw: string) {
 async function loadWorkbench() {
   loading.value = true;
   try {
-    const [editorResponse, versionsResponse] = await Promise.all([
+    const [editorResponse, versionsResponse, _statusLoaded, servicesResponse, configResponse] = await Promise.all([
       apiService.getPipelineEditor(taskId),
       apiService.getPipelineVersions(taskId),
+      pipelineStore.fetchStatus(taskId),
+      apiService.getAIServices(),
+      apiService.getAIConfig(),
     ]);
     title.value = editorResponse.data?.title || '';
     content.value = editorResponse.data?.content || '';
     syncBlocksFromContent(content.value);
     sourceVersionId.value = editorResponse.data?.draft?.source_version_id || editorResponse.data?.sourceVersion?.id || null;
     versions.value = versionsResponse.data?.versions || [];
+    availableServices.value = servicesResponse.data?.services || [];
+    configuredServices.value = configResponse.data?.configs || [];
     compareBaseId.value = versions.value[1]?.id || versions.value[0]?.id || null;
     compareTargetId.value = versions.value[0]?.id || null;
+    syncResumeSelectionFromTask();
+    if (pipelineStore.currentTask?.status === 'running') {
+      pipelineStore.connectToStream(taskId);
+    }
   } catch (error: any) {
     toast.error(error.message || '加载编辑工作台失败');
   } finally {
     loading.value = false;
   }
+}
+
+function syncResumeSelectionFromTask() {
+  if (!task.value) return;
+  resumeService.value = task.value.ai_service || 'cloudflare-ai';
+  resumeModel.value = task.value.ai_model || currentTaskServiceConfig.value?.model || currentTaskServiceMeta.value?.defaultModel || '';
 }
 
 async function saveDraft() {
@@ -183,6 +239,20 @@ watch([title, content], () => {
 watch(screenplayBlocks, (blocks) => {
   content.value = serializeBlocks(blocks);
 }, { deep: true });
+
+watch(() => task.value?.id, () => {
+  syncResumeSelectionFromTask();
+}, { immediate: true });
+
+watch(() => resumeService.value, (serviceId) => {
+  const config = configuredServices.value.find((item) => item.service_name === serviceId);
+  const service = availableServices.value.find((item) => item.id === serviceId);
+  if (serviceId === task.value?.ai_service) {
+    resumeModel.value = task.value?.ai_model || config?.model || service?.defaultModel || '';
+    return;
+  }
+  resumeModel.value = config?.model || service?.defaultModel || '';
+});
 
 async function publishVersion() {
   publishing.value = true;
@@ -288,22 +358,54 @@ function blockTypeMeta(type: ScreenplayBlockType) {
   return blockTypeOptions.find((item) => item.value === type) || blockTypeOptions[0];
 }
 
+async function handlePause() {
+  try {
+    await pipelineStore.pausePipeline(taskId);
+    toast.success('任务已暂停');
+  } catch (error: any) {
+    toast.error(error.message || '暂停失败');
+  }
+}
+
+async function handleResume() {
+  if (!resumeUsableServices.value.find((service) => service.id === resumeService.value)) {
+    toast.error('所选恢复模型渠道尚未通过检测');
+    return;
+  }
+
+  resuming.value = true;
+  try {
+    await pipelineStore.resumePipeline(taskId, {
+      ai_service: resumeService.value,
+      ai_model: resumeModel.value || undefined,
+    });
+    toast.success(`已恢复，当前模型：${resumeService.value}${resumeModel.value ? ` / ${resumeModel.value}` : ''}`);
+  } catch (error: any) {
+    toast.error(error.message || '恢复失败');
+  } finally {
+    resuming.value = false;
+  }
+}
+
 onMounted(loadWorkbench);
+onUnmounted(() => {
+  pipelineStore.closeStream();
+});
 </script>
 
 <template>
   <div class="p-6">
     <div class="max-w-7xl mx-auto space-y-6">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <div class="flex items-center gap-3 mb-2">
-            <RouterLink :to="`/pipeline/${taskId}`" class="text-sm text-[#737373] hover:text-white transition-colors">← 返回流水线</RouterLink>
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-3 mb-2">
+            <RouterLink to="/history" class="text-sm text-[#737373] hover:text-white transition-colors">← 返回项目库</RouterLink>
             <span class="text-[11px] px-2 py-1 rounded bg-[#2563EB]/10 text-[#93C5FD]">企业编辑工作台</span>
           </div>
           <h1 class="text-lg font-semibold text-white">剧本编辑与版本管理</h1>
-          <p class="text-sm text-[#737373] mt-1">支持自动保存草稿、发布版本和版本间差异对比。</p>
-        </div>
-        <div class="flex items-center gap-3 text-xs">
+          <p class="text-sm text-[#737373] mt-1">把生成进度、成稿编辑、版本管理和差异对比集中在一个项目工作台中。</p>
+          </div>
+          <div class="flex items-center gap-3 text-xs">
           <span :class="autosaveState === 'saving' ? 'text-amber-300' : autosaveState === 'saved' ? 'text-emerald-300' : 'text-[#737373]'">
             {{ autosaveState === 'saving' ? '自动保存中...' : autosaveState === 'saved' ? '草稿已保存' : '待保存' }}
           </span>
@@ -312,10 +414,10 @@ onMounted(loadWorkbench);
         </div>
       </div>
 
-      <div v-if="loading" class="card text-sm text-[#737373]">加载中...</div>
+        <div v-if="loading" class="card text-sm text-[#737373]">加载中...</div>
 
-      <template v-else>
-        <div class="grid xl:grid-cols-[240px,1fr,360px] gap-6">
+        <template v-else>
+          <div class="grid xl:grid-cols-[240px,1fr,360px] gap-6">
           <div class="space-y-4">
             <div class="card !p-4">
               <div class="flex items-center justify-between mb-3">
@@ -408,6 +510,63 @@ onMounted(loadWorkbench);
 
           <div class="space-y-4">
             <div class="card !p-4">
+              <div class="flex items-start justify-between gap-3 mb-3">
+                <div>
+                  <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">Project Runtime</div>
+                  <div class="text-base font-semibold text-white">{{ task?.title || title || '当前项目' }}</div>
+                </div>
+                <span :class="task?.status === 'running' ? 'px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-300 text-[11px] border border-emerald-500/20' : task?.status === 'paused' ? 'px-2 py-1 rounded-full bg-amber-500/10 text-amber-300 text-[11px] border border-amber-500/20' : task?.status === 'completed' ? 'px-2 py-1 rounded-full bg-sky-500/10 text-sky-300 text-[11px] border border-sky-500/20' : 'px-2 py-1 rounded-full bg-[#2F2F2F] text-[#A3A3A3] text-[11px]'">
+                  {{ task?.status === 'running' ? '生成中' : task?.status === 'paused' ? '已暂停' : task?.status === 'completed' ? '已完成' : task?.status === 'failed' ? '已失败' : '草稿中' }}
+                </span>
+              </div>
+              <div class="space-y-2 text-sm text-[#A3A3A3]">
+                <div class="flex items-center justify-between gap-4">
+                  <span>当前步骤</span>
+                  <span class="text-white text-right">{{ taskStepName || '已进入编辑阶段' }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <span>已完成集数</span>
+                  <span class="text-white text-right">{{ task?.completed_episodes || 0 }}/{{ task?.total_episodes || 0 }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <span>当前模型</span>
+                  <span class="text-white text-right">{{ task?.ai_model || '默认模型' }}</span>
+                </div>
+                <div class="flex items-center justify-between gap-4">
+                  <span>当前渠道</span>
+                  <span class="text-white text-right">{{ currentTaskServiceMeta?.name || task?.ai_service || 'cloudflare-ai' }}</span>
+                </div>
+              </div>
+              <div v-if="task" class="mt-4 h-2 bg-[#2F2F2F] rounded-full overflow-hidden">
+                <div class="h-full bg-[#2563EB]" :style="{ width: `${Math.max((task.completed_episodes || 0) / Math.max(task.total_episodes || 1, 1) * 100, task.current_step ? (task.current_step / 8) * 40 : 0)}%` }"></div>
+              </div>
+              <div v-if="currentStepSummary" class="mt-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
+                <div class="text-[11px] uppercase tracking-[0.18em] text-violet-300 mb-2">当前步骤摘要</div>
+                <div class="text-xs text-[#E5E5E5] whitespace-pre-wrap leading-6">{{ currentStepSummary.length > 320 ? `${currentStepSummary.slice(0, 320)}…` : currentStepSummary }}</div>
+              </div>
+              <div v-if="task?.status === 'paused'" class="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 space-y-3">
+                <div class="text-[11px] uppercase tracking-[0.18em] text-amber-300">恢复控制台</div>
+                <select v-model="resumeService" class="input-field !text-sm" :disabled="loadingServices || resuming">
+                  <option v-for="service in resumeUsableServices" :key="service.id" :value="service.id">{{ service.name }}</option>
+                </select>
+                <input v-model="resumeModel" list="workbench-resume-models" class="input-field !text-sm" :placeholder="resumeServiceMeta?.defaultModel || '输入模型名称'" :disabled="resuming" />
+                <datalist id="workbench-resume-models">
+                  <option v-for="modelOption in resumeModelSuggestions" :key="modelOption" :value="modelOption"></option>
+                </datalist>
+                <div v-if="resumeModelSuggestions.length" class="flex flex-wrap gap-1.5">
+                  <button v-for="modelOption in resumeModelSuggestions" :key="modelOption" type="button" @click="resumeModel = modelOption" class="px-2 py-0.5 rounded-full border border-[#3A3A3A] text-[10px] text-[#D4D4D4] hover:border-[#FBBF24] hover:text-[#FDE68A] transition-colors">
+                    {{ modelOption }}
+                  </button>
+                </div>
+              </div>
+              <div class="mt-4 flex gap-2">
+                <RouterLink :to="`/pipeline/${taskId}`" class="btn-secondary text-sm flex-1 text-center">查看流水线</RouterLink>
+                <button v-if="task?.status === 'running'" class="btn-secondary text-sm flex-1" @click="handlePause">暂停</button>
+                <button v-if="task?.status === 'paused'" class="btn-primary text-sm flex-1" :disabled="resuming" @click="handleResume">{{ resuming ? '恢复中...' : '恢复执行' }}</button>
+              </div>
+            </div>
+
+            <div class="card !p-4">
               <div class="text-sm font-medium text-white mb-3">版本时间线</div>
               <div class="space-y-2 max-h-[280px] overflow-auto pr-1">
                 <div v-for="version in versions" :key="version.id" class="rounded-lg border border-[#2F2F2F] bg-[#202020] p-3">
@@ -429,6 +588,23 @@ onMounted(loadWorkbench);
                 <option v-for="version in versions" :key="`target-${version.id}`" :value="version.id">v{{ version.version }} · {{ version.label || `版本 ${version.version}` }}</option>
               </select>
               <button class="btn-secondary text-sm w-full" @click="compareVersions">开始对比</button>
+            </div>
+
+            <div class="card !p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="text-sm font-medium text-white">实时日志</div>
+                <div class="text-[11px] text-[#737373]">{{ recentLogs.length }} 条</div>
+              </div>
+              <div class="space-y-2 max-h-[260px] overflow-auto pr-1 font-mono text-xs">
+                <div v-if="!recentLogs.length" class="text-[#666]">生成启动后，这里会显示最新 10 条现场日志。</div>
+                <div v-for="log in recentLogs" :key="log.id" class="rounded-lg border border-[#2F2F2F] bg-[#202020] p-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-[#737373]">{{ new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
+                    <span :class="log.level === 'error' ? 'text-red-300' : log.level === 'success' ? 'text-emerald-300' : 'text-[#93C5FD]'">{{ log.message }}</span>
+                  </div>
+                  <div v-if="log.detail" class="text-[#8A8A8A] whitespace-pre-wrap leading-5">{{ log.detail.length > 240 ? `${log.detail.slice(0, 240)}…` : log.detail }}</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

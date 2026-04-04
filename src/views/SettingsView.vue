@@ -50,6 +50,18 @@ const passedServices = computed(() =>
   configs.value.filter((config) => config.validation_status === 'passed').length,
 );
 
+const failedServices = computed(() =>
+  configs.value.filter((config) => config.validation_status === 'failed').length,
+);
+
+const pendingServices = computed(() =>
+  aiServices.value.length - passedServices.value - failedServices.value,
+);
+
+const healthyServices = computed(() =>
+  configs.value.filter((config) => config.validation_status === 'passed').map((config) => config.service_name),
+);
+
 const selectedValidationTone = computed(() => {
   const status = activeConfig.value?.validation_status;
   if (status === 'passed') return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20';
@@ -99,6 +111,14 @@ function formatDate(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function getServiceOperationalStatus(serviceId: string) {
+  const config = configs.value.find((item) => item.service_name === serviceId);
+  if (!config) return { label: '未配置', tone: 'text-[#A3A3A3] bg-[#2F2F2F]/80 border-[#404040]' };
+  if (config.validation_status === 'passed') return { label: '可用于生产', tone: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' };
+  if (config.validation_status === 'failed') return { label: '需修复', tone: 'text-red-300 bg-red-500/10 border-red-500/20' };
+  return { label: '待检测', tone: 'text-amber-200 bg-amber-500/10 border-amber-500/20' };
 }
 
 function applyConfigForService(
@@ -275,15 +295,16 @@ onMounted(loadSettings);
           <div class="relative grid lg:grid-cols-[1.6fr_1fr] gap-6 items-end">
             <div>
               <div class="inline-flex items-center gap-2 rounded-full border border-[#3B82F6]/30 bg-[#2563EB]/10 px-3 py-1 text-xs text-[#93C5FD] mb-4">
-                AI Channel Control Center
+                AI Infrastructure Console
               </div>
-              <h1 class="text-3xl lg:text-4xl font-semibold text-white tracking-tight mb-3">配置页升级为更清晰、更可靠的模型渠道中心</h1>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-2">Operations / Runtime Readiness</div>
+              <h1 class="text-3xl lg:text-4xl font-semibold text-white tracking-tight mb-3">统一管理生成基础设施、默认渠道与运行健康度</h1>
               <p class="text-sm lg:text-base text-[#A3A3A3] max-w-2xl leading-7">
-                渠道卡片只负责总览，具体配置、检测和保存都放进弹框里，减少页面负担，让主页面更聚焦在状态管理。
+                这里不只是“填模型参数”，而是整个创作平台的 AI 运行台：你可以判断哪些渠道可直接投入生产，哪些渠道仍待检测，以及当前默认执行策略是什么。
               </p>
             </div>
 
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div class="rounded-2xl border border-[#2F2F2F] bg-black/20 p-4">
                 <div class="text-[11px] uppercase tracking-[0.18em] text-[#737373] mb-1">当前激活</div>
                 <div class="text-sm font-medium text-white leading-6">{{ activeServiceName }}</div>
@@ -296,15 +317,61 @@ onMounted(loadSettings);
                 <div class="text-[11px] uppercase tracking-[0.18em] text-[#737373] mb-1">检测通过</div>
                 <div class="text-2xl font-semibold text-emerald-300">{{ passedServices }}</div>
               </div>
+              <div class="rounded-2xl border border-[#2F2F2F] bg-black/20 p-4">
+                <div class="text-[11px] uppercase tracking-[0.18em] text-[#737373] mb-1">待处理</div>
+                <div class="text-2xl font-semibold text-amber-300">{{ failedServices + pendingServices }}</div>
+              </div>
             </div>
           </div>
         </section>
 
+        <div class="grid xl:grid-cols-[1.1fr,0.9fr] gap-4 mb-8">
+          <div class="card !p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">默认生产策略</div>
+                <div class="text-base font-semibold text-white">{{ activeServiceName }}</div>
+              </div>
+              <span class="px-2 py-1 rounded-full text-[11px] border" :class="selectedValidationTone">{{ selectedValidationLabel }}</span>
+            </div>
+            <div class="space-y-3 text-sm text-[#A3A3A3]">
+              <div class="flex items-center justify-between gap-4">
+                <span>当前默认渠道</span>
+                <span class="text-white text-right">{{ activeServiceName }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span>推荐状态</span>
+                <span class="text-white text-right">{{ passedServices > 0 ? '优先使用检测通过的渠道' : '先完成至少一个渠道检测' }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span>最近检测</span>
+                <span class="text-white text-right">{{ activeConfig?.last_checked_at ? formatDate(activeConfig?.last_checked_at) : '暂无记录' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card !p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">渠道健康总览</div>
+                <div class="text-base font-semibold text-white">{{ aiServices.length }} 个可接入渠道</div>
+              </div>
+              <span class="text-[11px] text-[#737373]">生产可用 {{ healthyServices.length }} 个</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span v-for="service in aiServices" :key="service.id" :class="['px-2.5 py-1 rounded-full border text-[11px]', getServiceOperationalStatus(service.id).tone]">
+                {{ service.name }} · {{ getServiceOperationalStatus(service.id).label }}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div class="card !p-0 overflow-hidden">
           <div class="px-6 py-5 border-b border-[#2F2F2F] flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <h2 class="text-xl font-semibold text-white">模型渠道</h2>
-              <p class="text-sm text-[#737373] mt-1">点击任意卡片进入弹框编辑，避免大表单长期占据设置页。</p>
+              <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">Channel Operations</div>
+              <h2 class="text-xl font-semibold text-white">运行渠道</h2>
+              <p class="text-sm text-[#737373] mt-1">点击卡片进入弹框配置。主页面用于判断渠道健康度、默认执行策略与可生产状态。</p>
             </div>
             <div :class="['inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border', selectedValidationTone]">
               <span class="w-2 h-2 rounded-full" :class="activeConfig?.validation_status === 'passed' ? 'bg-emerald-400' : activeConfig?.validation_status === 'failed' ? 'bg-red-400' : 'bg-amber-300'"></span>
@@ -340,8 +407,11 @@ onMounted(loadSettings);
               <p class="text-xs leading-6 text-[#BDBDBD] min-h-[48px]">{{ service.description }}</p>
 
               <div class="mt-4 flex items-center justify-between gap-3 text-xs">
-                <span class="text-[#8D8D8D]">{{ configs.find((item) => item.service_name === service.id)?.last_check_message || '点击查看与配置' }}</span>
+                <span :class="['px-2 py-1 rounded-full border', getServiceOperationalStatus(service.id).tone]">{{ getServiceOperationalStatus(service.id).label }}</span>
                 <span class="text-[#CFCFCF]">{{ formatDate(configs.find((item) => item.service_name === service.id)?.last_checked_at) }}</span>
+              </div>
+              <div class="mt-3 text-[11px] text-[#8D8D8D] leading-6">
+                {{ configs.find((item) => item.service_name === service.id)?.last_check_message || '点击查看与配置' }}
               </div>
             </button>
           </div>
