@@ -53,7 +53,10 @@ async function loadTemplates() {
     const response = await apiService.getPromptTemplates();
     templates.value = response.data?.templates || [];
     if (templates.value.length) {
-      loadEditor(selectedNodeKey.value || templates.value[0].node_key);
+      selectedNodeKey.value = selectedNodeKey.value || templates.value[0].node_key;
+      const template = pickActiveTemplate(selectedNodeKey.value);
+      editor.value = template ? JSON.parse(JSON.stringify(template)) : null;
+      inspectedVersionId.value = template?.id || null;
     }
   } catch (error: any) {
     toast.error(error.message || '加载提示词模板失败');
