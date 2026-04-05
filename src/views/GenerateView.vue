@@ -177,6 +177,23 @@ async function autofillWithAI() {
     });
     const suggestion = response.data?.suggestion || {};
 
+    const normalizeStringArray = (value: unknown): string[] => {
+      if (!Array.isArray(value)) return [];
+      return value
+        .map((item) => {
+          if (typeof item === 'string') return item.trim();
+          if (item && typeof item === 'object') {
+            const objectValue = item as Record<string, unknown>;
+            return [objectValue.name, objectValue.role, objectValue.identity, objectValue.goal, objectValue.conflict]
+              .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+              .join('｜')
+              .trim();
+          }
+          return String(item || '').trim();
+        })
+        .filter(Boolean);
+    };
+
     const pickValue = <T>(currentValue: T, nextValue: T) => {
       if (autofillPolicy.value === 'overwrite') return nextValue;
       const isEmptyArray = Array.isArray(currentValue) && currentValue.length === 0;
@@ -196,8 +213,8 @@ async function autofillWithAI() {
       target_duration: Number(pickValue(formData.value.target_duration, Number(suggestion.target_duration || formData.value.target_duration || 60))),
       total_episodes: Number(pickValue(formData.value.total_episodes, Number(suggestion.total_episodes || formData.value.total_episodes || 50))),
       character_count: Number(pickValue(formData.value.character_count, Number(suggestion.character_count || formData.value.character_count || 5))),
-      key_points: Array.isArray(suggestion.key_points) ? pickValue(formData.value.key_points, suggestion.key_points) : formData.value.key_points,
-      characters_input: Array.isArray(suggestion.characters_input) ? pickValue(formData.value.characters_input, suggestion.characters_input) : formData.value.characters_input,
+      key_points: Array.isArray(suggestion.key_points) ? pickValue(formData.value.key_points, normalizeStringArray(suggestion.key_points)) : formData.value.key_points,
+      characters_input: Array.isArray(suggestion.characters_input) ? pickValue(formData.value.characters_input, normalizeStringArray(suggestion.characters_input)) : formData.value.characters_input,
       scene_input: pickValue(formData.value.scene_input, suggestion.scene_input || formData.value.scene_input),
     };
 
