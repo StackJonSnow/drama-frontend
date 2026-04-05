@@ -78,6 +78,7 @@ export interface AIService {
   apiKeyFormat?: string;
   defaultBaseUrl?: string;
   defaultModel?: string;
+  recentModels?: Array<{ value: string; label: string }>;
   tags?: string[];
 }
 

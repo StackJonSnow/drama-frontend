@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useToast } from '@/composables/useToast';
 import apiService from '@/services/api';
 import type { AIConfig, AIService } from '@/types';
@@ -12,6 +12,7 @@ const selectedService = ref<string>('cloudflare-ai');
 const apiKey = ref('');
 const baseUrl = ref('');
 const model = ref('');
+const draftConfigs = ref<Record<string, { apiKey: string; baseUrl: string; model: string }>>({});
 const loading = ref(true);
 const testing = ref(false);
 const saving = ref(false);
@@ -38,6 +39,14 @@ const selectedServiceMeta = computed(() =>
 const activeConfig = computed(() =>
   configs.value.find((config) => config.service_name === selectedService.value) ?? null,
 );
+
+const selectedServiceModelOptions = computed(() => {
+  const options = [...(selectedServiceMeta.value?.recentModels || [])];
+  if (model.value && !options.some((item) => item.value === model.value)) {
+    options.unshift({ value: model.value, label: `${model.value}（当前保存值）` });
+  }
+  return options;
+});
 
 const activeServiceName = computed(() => {
   const config = configs.value.find((item) => item.is_active);
@@ -131,22 +140,33 @@ function applyConfigForService(
 ) {
   const service = aiServices.value.find((item) => item.id === serviceId);
   const config = configs.value.find((item) => item.service_name === serviceId);
+  const existingDraft = draftConfigs.value[serviceId];
+  const nextDraft = existingDraft || {
+    apiKey: '',
+    baseUrl: config?.base_url || service?.defaultBaseUrl || '',
+    model: config?.model || service?.defaultModel || '',
+  };
+
+  draftConfigs.value = {
+    ...draftConfigs.value,
+    [serviceId]: nextDraft,
+  };
 
   selectedService.value = serviceId;
   if (!options.preserveApiKey) {
-    apiKey.value = '';
+    apiKey.value = nextDraft.apiKey;
   }
   if (!options.preserveBaseUrl) {
-    baseUrl.value = config?.base_url || service?.defaultBaseUrl || '';
+    baseUrl.value = nextDraft.baseUrl;
   }
   if (!options.preserveModel) {
-    model.value = config?.model || service?.defaultModel || '';
+    model.value = nextDraft.model;
   }
   testStatus.value = 'idle';
   testMessage.value = config?.last_check_message || '';
 }
 
-async function loadSettings() {
+async function loadSettings(preferredServiceId?: string) {
   loading.value = true;
 
   try {
@@ -160,7 +180,8 @@ async function loadSettings() {
 
     const active = configs.value.find((item) => item.is_active)?.service_name;
     const fallback = aiServices.value.find((item) => item.isDefault)?.id || aiServices.value[0]?.id || 'cloudflare-ai';
-    applyConfigForService(active || fallback);
+    const targetServiceId = preferredServiceId || selectedService.value || active || fallback;
+    applyConfigForService(targetServiceId);
   } catch (error: any) {
     toast.error(error.message || '加载设置失败');
   } finally {
@@ -179,10 +200,22 @@ function closeModal() {
 
 function resetBaseUrlToDefault() {
   baseUrl.value = selectedServiceMeta.value?.defaultBaseUrl || '';
+  if (selectedService.value) {
+    draftConfigs.value[selectedService.value] = {
+      ...(draftConfigs.value[selectedService.value] || { apiKey: '', baseUrl: '', model: '' }),
+      baseUrl: baseUrl.value,
+    };
+  }
 }
 
 function resetModelToDefault() {
   model.value = selectedServiceMeta.value?.defaultModel || '';
+  if (selectedService.value) {
+    draftConfigs.value[selectedService.value] = {
+      ...(draftConfigs.value[selectedService.value] || { apiKey: '', baseUrl: '', model: '' }),
+      model: model.value,
+    };
+  }
 }
 
 async function copyText(value?: string) {
@@ -227,7 +260,13 @@ async function testConnection() {
       model.value = response.data.resolvedModel;
     }
 
-    await loadSettings();
+    draftConfigs.value[targetServiceId] = {
+      apiKey: currentApiKey,
+      baseUrl: baseUrl.value,
+      model: model.value,
+    };
+
+    await loadSettings(targetServiceId);
     applyConfigForService(targetServiceId, {
       preserveApiKey: true,
       preserveBaseUrl: true,
@@ -269,7 +308,12 @@ async function saveConfig() {
 
     toast.success(response.message || '配置已保存');
     apiKey.value = '';
-    await loadSettings();
+    draftConfigs.value[targetServiceId] = {
+      apiKey: '',
+      baseUrl: baseUrl.value,
+      model: model.value,
+    };
+    await loadSettings(targetServiceId);
     applyConfigForService(targetServiceId);
     modalOpen.value = false;
   } catch (error: any) {
@@ -278,6 +322,18 @@ async function saveConfig() {
     saving.value = false;
   }
 }
+
+watch([selectedService, apiKey, baseUrl, model], ([serviceId, nextApiKey, nextBaseUrl, nextModel]) => {
+  if (!serviceId) return;
+  draftConfigs.value = {
+    ...draftConfigs.value,
+    [serviceId]: {
+      apiKey: nextApiKey,
+      baseUrl: nextBaseUrl,
+      model: nextModel,
+    },
+  };
+});
 
 onMounted(loadSettings);
 </script>
@@ -456,7 +512,10 @@ onMounted(loadSettings);
                         <button type="button" @click="resetModelToDefault" class="text-[11px] text-[#60A5FA] hover:text-[#93C5FD] transition-colors">恢复默认</button>
                       </div>
                     </div>
-                    <input v-model="model" type="text" class="input-field bg-[#191919]" :placeholder="selectedServiceMeta?.defaultModel || '输入模型名'" />
+                    <select v-model="model" class="input-field bg-[#191919]">
+                      <option v-for="option in selectedServiceModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                    <div class="mt-2 text-[11px] text-[#8D8D8D] leading-6">下拉枚举为各渠道近两年常用模型；若保存后切换渠道，不会再被当前激活渠道的配置覆盖。</div>
                   </div>
 
                   <div class="rounded-2xl border border-[#2F2F2F] bg-black/20 p-4 text-sm text-[#BDBDBD] leading-6">
