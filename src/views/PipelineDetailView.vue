@@ -65,6 +65,17 @@ const resumeModelSuggestions = computed(() => {
   return Array.from(new Set(suggestions));
 });
 
+const runtimeEpisodeContext = computed(() => {
+  const logs = [...pipelineStore.realtimeLogs].reverse();
+  const episodeLog = logs.find((log) => typeof log.episodeNumber === 'number');
+  const stepLog = logs.find((log) => log.stepName && [5, 6, 7].includes(Number(log.step)));
+  return {
+    episodeNumber: episodeLog?.episodeNumber || null,
+    latestMessage: episodeLog?.message || stepLog?.message || '',
+    stepLabel: stepLog?.stepName || '',
+  };
+});
+
 function syncResumeSelectionFromTask() {
   const task = pipelineStore.currentTask;
   if (!task) return;
@@ -917,13 +928,27 @@ function formatActLabel(act: string) {
         <div class="text-[11px] uppercase tracking-[0.18em] text-[#666]">Advanced Diagnostics / Pipeline Overview</div>
       </div>
 
-      <div class="rounded-2xl border border-[#2F2F2F] bg-[#202020] p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">Primary Workspace</div>
-          <div class="text-white font-medium">日常创作、恢复项目和改稿，请优先在工作台进行；这里更适合查看执行诊断、步骤细节与版本快照。</div>
+        <div class="rounded-2xl border border-[#2F2F2F] bg-[#202020] p-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div>
+            <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-1">Primary Workspace</div>
+            <div class="text-white font-medium">日常创作、恢复项目和改稿，请优先在工作台进行；这里更适合查看执行诊断、步骤细节与版本快照。</div>
+          </div>
+          <RouterLink :to="`/pipeline/${taskId}/editor`" class="btn-primary text-sm whitespace-nowrap">返回工作台</RouterLink>
         </div>
-        <RouterLink :to="`/pipeline/${taskId}/editor`" class="btn-primary text-sm whitespace-nowrap">返回工作台</RouterLink>
-      </div>
+
+        <div v-if="runtimeEpisodeContext.latestMessage" class="rounded-2xl border border-[#2F2F2F] bg-[#202020] p-4">
+          <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-2">Episode Runtime</div>
+          <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div>
+              <div class="text-white font-medium">{{ runtimeEpisodeContext.latestMessage }}</div>
+              <div class="text-sm text-[#737373] mt-1">
+                {{ runtimeEpisodeContext.episodeNumber ? `当前分集：第 ${runtimeEpisodeContext.episodeNumber} 集` : '当前尚未进入逐集生成' }}
+                <span v-if="runtimeEpisodeContext.stepLabel"> · 当前循环步骤：{{ runtimeEpisodeContext.stepLabel }}</span>
+              </div>
+            </div>
+            <div class="text-xs text-[#A3A3A3]">如果长时间停留在同一集同一步骤，再视为异常。</div>
+          </div>
+        </div>
 
       <div v-if="pipelineStore.loading" class="flex justify-center py-12">
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500"></div>

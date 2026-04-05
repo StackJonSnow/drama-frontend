@@ -44,6 +44,16 @@ const sceneHeadingPresets = [
 const diffRows = computed(() => compareResult.value?.diff || []);
 const task = computed(() => pipelineStore.currentTask);
 const recentLogs = computed(() => pipelineStore.realtimeLogs.slice(-10));
+const runtimeEpisodeContext = computed(() => {
+  const logs = [...pipelineStore.realtimeLogs].reverse();
+  const episodeLog = logs.find((log) => typeof log.episodeNumber === 'number');
+  const stepLog = logs.find((log) => log.stepName && [5, 6, 7].includes(Number(log.step)));
+  return {
+    episodeNumber: episodeLog?.episodeNumber || null,
+    latestMessage: episodeLog?.message || stepLog?.message || '',
+    stepLabel: stepLog?.stepName || '',
+  };
+});
 const taskStepName = computed(() => {
   const step = pipelineStore.steps.find((item) => item.step_number === task.value?.current_step);
   return step?.step_name || '';
@@ -536,9 +546,18 @@ onUnmounted(() => {
                   <span>当前渠道</span>
                   <span class="text-white text-right">{{ currentTaskServiceMeta?.name || task?.ai_service || 'cloudflare-ai' }}</span>
                 </div>
+                <div class="flex items-center justify-between gap-4">
+                  <span>当前分集</span>
+                  <span class="text-white text-right">{{ runtimeEpisodeContext.episodeNumber ? `第 ${runtimeEpisodeContext.episodeNumber} 集` : '等待进入分集生成' }}</span>
+                </div>
               </div>
               <div v-if="task" class="mt-4 h-2 bg-[#2F2F2F] rounded-full overflow-hidden">
                 <div class="h-full bg-[#2563EB]" :style="{ width: `${Math.max((task.completed_episodes || 0) / Math.max(task.total_episodes || 1, 1) * 100, task.current_step ? (task.current_step / 8) * 40 : 0)}%` }"></div>
+              </div>
+              <div v-if="runtimeEpisodeContext.latestMessage" class="mt-4 rounded-xl border border-[#2F2F2F] bg-[#202020] p-3">
+                <div class="text-[11px] uppercase tracking-[0.18em] text-[#666] mb-2">分集进度提示</div>
+                <div class="text-sm text-white">{{ runtimeEpisodeContext.latestMessage }}</div>
+                <div v-if="runtimeEpisodeContext.stepLabel" class="text-xs text-[#737373] mt-1">当前循环步骤：{{ runtimeEpisodeContext.stepLabel }}</div>
               </div>
               <div v-if="currentStepSummary" class="mt-4 rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
                 <div class="text-[11px] uppercase tracking-[0.18em] text-violet-300 mb-2">当前步骤摘要</div>
